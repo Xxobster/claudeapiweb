@@ -22,3 +22,8 @@
 - T-20: Nirandyr `docs/procedures/api_parallel.md` forbids Unity/Blender/GPU for API jobs. Recommended: allow CPM lanes to use them under devlock / gpu_lock / BUILD_RUNNING, and update that procedure via a Nirandyr PR. Lanes WP13/WP14 wait for this answer.
 - Confirmed paths: Unity.exe `D:\Unity\Editors\6000.3.25f1\Editor\Unity.exe`; Blender 5.2.2 `blender.exe` in `C:\Program Files\Blender Foundation\Blender 5.2\`.
 - Maps: no overworld map generator found in Nirandyr tools, only the dungeon generator (`tools/sim/dungeon_gen.sh`). Question: is the dungeon generator the "map" lane target?
+
+## 2026-10-21 (WP0 answers) — Micah: "je suis d'accord avec tout"
+- T-20 accepted: CPM lanes may use Unity, Blender and GPU tools under devlock / gpu_lock / BUILD_RUNNING. A Nirandyr PR must update `docs/procedures/api_parallel.md` accordingly (to do, not done by CPM).
+- Create `main` on `Xxobster/claudeapiweb` from the planning branch after PR #1 merges (not done yet).
+- Map lane target (answer from the Nirandyr side, relayed by Micah): `tools/sim/zone_gen.sh` (`--world` for the world map) with `tools/sim/zonegen/village_gen.py`, `mountain_caves.py`, its tests and golden files `golden_frozen_v1.txt`, `golden_layouts*.txt`. `dungeon_gen.sh` is a separate "dungeons" lane. The map lane only runs the generator and tests, compares with the golden files and reports differences, never fixes (map frozen, Nirandyr decision 413). `zone_gen.sh` waits while `BUILD_RUNNING.lock` exists; no adb, no GPU. Not verified by WP0 (not found in the local checkout); WP14 must confirm the paths on `main` of Nirandyr.
