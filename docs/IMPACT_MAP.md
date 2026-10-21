@@ -1,13 +1,13 @@
-# IMPACT_MAP (skeleton, WP0, v0.0.1, 2026-10-21)
+# IMPACT_MAP (WP1, v0.1.0, 2026-10-21)
 
-Rule: before editing a module, read its row; after editing, update the row, the chains and the change log (CLAUDE.md rules 2 and 22). Modules do not exist yet; rows describe the planned design (ARCHITECTURE.md).
+Rule: before editing a module, read its row; after editing, update the row, the chains and the change log (CLAUDE.md rules 2 and 22). Modules marked (built) exist in code; the others describe the planned design (ARCHITECTURE.md).
 
 ## 1. Matrix (module -> touches)
 | Module (planned) | Reads/writes | Touches (must re-check when changed) | WP |
 |---|---|---|---|
-| `db` (models, migrations) | SQLite | every module; migrations; backup/restore; security tests on schema | WP1 |
-| `security` (token, Origin/CSRF, path validator, secrets, redaction) | keyring, logs | api, workers (env), git, discovery, all tests/security | WP1-2 |
-| `api` (FastAPI, WebSocket) | db, scheduler | UI, security middleware, event stream | WP1+ |
+| `db` (built: `src/cpm/db/{engine,models,migrate}.py`, `migrations/`) | SQLite | every module; migrations; backup/restore; security tests on schema | WP1 |
+| `security` (built so far: `redaction.py`; `config.py` loopback + no-OneDrive checks; rest WP2) (token, Origin/CSRF, path validator, secrets, redaction) | keyring, logs | api, workers (env), git, discovery, all tests/security | WP1-2 |
+| `api` (built: `app.py` with `/health` only) (FastAPI, WebSocket) | db, scheduler | UI, security middleware, event stream | WP1+ |
 | `discovery` | managed repo (read-only) | tasks import, worker prompts, workspace trust | WP3 |
 | `tasks` (DAG, state machine) | db | scheduler, UI, acceptance gate, budgets | WP4 |
 | `workers` (runner, providers) | worktrees, SDK | budget ledger, reservations, logs, Job Object, billing mode | WP5 |
@@ -31,7 +31,15 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 ## 3. Open risks (see THREATS.md for the full list)
 High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Micah's decision). Process: no `main` branch on the GitHub repo; subscription use of the SDK unverified (CLI mode stays a stub); Admin cost API availability unknown.
 
+## 2b. WP1 notes
+- Adding/changing a column: edit `models.py`, generate a new Alembic revision (never edit `0001`), re-run `tests/integration/test_health_and_db.py`, update backup/restore (WP9) and the cost ledger (WP8) if money or usage columns change.
+- Money columns are integer micro-dollars (`*_microusd`); convert with `Decimal` at the edges only.
+- Status columns are free strings until WP4 adds the transition table; do not rely on SQL to validate them.
+- Log handlers must use `RedactingFormatter` (`logging_setup.py`); any new handler bypassing it is a T-01 regression.
+- `config.load_settings` is the only place reading `CPM_*` env vars.
+
 ## 4. Change log
 | Date | Version | Change | By |
 |---|---|---|---|
 | 2026-10-21 | 0.0.1 | WP0: SDK_NOTES, ARCHITECTURE, THREATS, this skeleton, scripts/check_env.ps1, DECISIONS synced with the planning branch | CPM Plan thread |
+| 2026-10-21 | 0.1.0 | WP1: skeleton (FastAPI `/health`, SQLAlchemy models for 11 core tables, Alembic baseline `0001`, WAL/FK/busy_timeout pragmas, redacting logger, loopback + no-OneDrive config checks, setup/start scripts, CI) | CPM Code thread |
