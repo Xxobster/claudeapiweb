@@ -16,3 +16,9 @@
 
 ## 2026-10-21 (later) — Unity path
 - Unity.exe: `D:\Unity\Editors\6000.3.25f1\Editor\Unity.exe` (given by Micah; WP0 only confirms it runs).
+
+## 2026-10-21 (WP0) — findings awaiting Micah (recommendation applies until answered)
+- Branch: the GitHub repo has no `main`; the default branch is `claude/project-thread-px0aun`. WP0 PR targets it. Recommended: create `main` from it after merge.
+- T-20: Nirandyr `docs/procedures/api_parallel.md` forbids Unity/Blender/GPU for API jobs. Recommended: allow CPM lanes to use them under devlock / gpu_lock / BUILD_RUNNING, and update that procedure via a Nirandyr PR. Lanes WP13/WP14 wait for this answer.
+- Confirmed paths: Unity.exe `D:\Unity\Editors\6000.3.25f1\Editor\Unity.exe`; Blender 5.2.2 `blender.exe` in `C:\Program Files\Blender Foundation\Blender 5.2\`.
+- Maps: no overworld map generator found in Nirandyr tools, only the dungeon generator (`tools/sim/dungeon_gen.sh`). Question: is the dungeon generator the "map" lane target?
