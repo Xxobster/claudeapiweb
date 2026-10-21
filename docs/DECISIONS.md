@@ -8,3 +8,8 @@
   - Blender 5.2: `C:\Program Files\Blender Foundation\Blender 5.2\blender-launcher.exe` (for batch/background runs use `blender.exe` in the same folder with `-b`; WP0 verifies).
   - Still unknown: local voice pipeline (TTS/training tools), the map generator and the 3D generation scripts in Nirandyr. WP0 inspects `D:\projects\game\tools\` read-only to list them, and the lane packages (WP13/WP14) use that list.
 - Still open for Micah: the monthly cap amount (Q1).
+
+## 2026-10-21 (later) — Q1 answered
+- Micah: yes to API spending and to the 2 USD first live smoke test. "We must always know the remaining budget and work according to the plan; if the tokens run out there is a described procedure."
+- Applied: CPM always shows remaining budget (global, project, task) and admits work only if it fits; at exhaustion it follows PLAN.md WP8 / master prompt section 12 (PAUSED_BUDGET, preserved worktree, handoff note per CLAUDE.md rule 15).
+- The monthly cap amount was not given: it is set by Micah in the first-run wizard. Until a cap is configured, the scheduler admits no live (billable) run; mock runs are unaffected.
