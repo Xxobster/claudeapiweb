@@ -13,3 +13,6 @@
 - Micah: yes to API spending and to the 2 USD first live smoke test. "We must always know the remaining budget and work according to the plan; if the tokens run out there is a described procedure."
 - Applied: CPM always shows remaining budget (global, project, task) and admits work only if it fits; at exhaustion it follows PLAN.md WP8 / master prompt section 12 (PAUSED_BUDGET, preserved worktree, handoff note per CLAUDE.md rule 15).
 - The monthly cap amount was not given: it is set by Micah in the first-run wizard. Until a cap is configured, the scheduler admits no live (billable) run; mock runs are unaffected.
+
+## 2026-10-21 (later) — Unity path
+- Unity.exe: `D:\Unity\Editors\6000.3.25f1\Editor\Unity.exe` (given by Micah; WP0 only confirms it runs).
