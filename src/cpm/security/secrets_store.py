@@ -55,19 +55,25 @@ class KeyringSecretStore:
             raise SecretStoreUnavailable("no secure credential backend on this machine")
         return keyring
 
+    def _call(self, op: str, *args: str) -> Any:
+        """Run a keyring operation; backend failures are normalized."""
+        kr = self._kr()
+        try:
+            return getattr(kr, op)(self.service, *args)
+        except kr.errors.PasswordDeleteError:
+            return None  # deleting a missing entry is a no-op
+        except Exception as exc:  # backend-specific errors (KeyringLocked, pywin32 errors, ...)
+            raise SecretStoreUnavailable(f"credential store failed during {op}") from exc
+
     def get(self, name: str) -> str | None:
-        value: str | None = self._kr().get_password(self.service, name)
+        value: str | None = self._call("get_password", name)
         if value:
             register_secret(value)
         return value
 
     def set(self, name: str, value: str) -> None:
         register_secret(value)
-        self._kr().set_password(self.service, name, value)
+        self._call("set_password", name, value)
 
     def delete(self, name: str) -> None:
-        kr = self._kr()
-        try:
-            kr.delete_password(self.service, name)
-        except kr.errors.PasswordDeleteError:
-            pass
+        self._call("delete_password", name)

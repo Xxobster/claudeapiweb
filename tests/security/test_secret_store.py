@@ -63,3 +63,18 @@ def test_api_503_when_storage_unavailable(settings, restore):
             "/api/credentials/anthropic", json={"api_key": "sk-ant-api03-" + "a" * 30}, headers=h
         )
         assert r.status_code == 503
+
+
+class Locked(Dict):
+    def get_password(self, s, u):
+        raise keyring.errors.KeyringLocked("vault locked")
+
+    set_password = delete_password = get_password
+
+
+def test_backend_failures_become_unavailable(restore):
+    keyring.set_keyring(Locked())
+    s = KeyringSecretStore("cpm-test")
+    for call in (lambda: s.get("k"), lambda: s.set("k", "v" * 30), lambda: s.delete("k")):
+        with pytest.raises(SecretStoreUnavailable):
+            call()
