@@ -26,6 +26,7 @@ class Settings:
     port: int
     data_dir: Path
     log_level: str
+    allow_live_key_test: bool = False
 
     @property
     def db_path(self) -> Path:
@@ -74,4 +75,5 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         port=port,
         data_dir=_check_data_dir(Path(e.get("CPM_DATA_DIR", str(_REPO_ROOT / "data")))),
         log_level=e.get("CPM_LOG_LEVEL", "INFO").upper(),
+        allow_live_key_test=e.get("CPM_ALLOW_LIVE_KEY_TEST") == "1",
     )

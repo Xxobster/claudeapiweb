@@ -11,6 +11,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install --no-deps -e .
       - run: ruff check .
+      - run: mypy --strict src
       - run: pytest -m "not windows"
+      - run: pip-audit -r requirements.lock --no-deps --disable-pip
+      - name: Lockfile is up to date
+        run: |
+          pip install uv
+          uv pip compile pyproject.toml --extra dev --universal --python-version 3.12 \
+            --generate-hashes -o /tmp/check.lock
+          diff <(grep -v '^#' requirements.lock) <(grep -v '^#' /tmp/check.lock)
+        shell: bash
