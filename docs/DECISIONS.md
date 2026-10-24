@@ -28,6 +28,14 @@
 - Create `main` on `Xxobster/claudeapiweb` from the planning branch after PR #1 merges (not done yet).
 - Map lane target (answer from the Nirandyr side, relayed by Micah): `tools/sim/zone_gen.sh` (`--world` for the world map) with `tools/sim/zonegen/village_gen.py`, `mountain_caves.py`, its tests and golden files `golden_frozen_v1.txt`, `golden_layouts*.txt`. `dungeon_gen.sh` is a separate "dungeons" lane. The map lane only runs the generator and tests, compares with the golden files and reports differences, never fixes (map frozen, Nirandyr decision 413). `zone_gen.sh` waits while `BUILD_RUNNING.lock` exists; no adb, no GPU. Not verified by WP0 (not found in the local checkout); WP14 must confirm the paths on `main` of Nirandyr.
 
+## 2026-10-24 (WP2) — implementation choices (awaiting Micah only if he disagrees)
+- Auth model: random install token in `data\install_token` sent as `X-CPM-Token`; CSRF token derived by HMAC and sent as `X-CPM-CSRF` on POST/PUT/PATCH/DELETE; Host must be `127.0.0.1|localhost|[::1]:<port>`; Origin, when present, must be the same. Only `GET /health` is public. No cookies, no CORS.
+- Key storage: `keyring` (Windows Credential Manager). No plaintext fallback: if no secure backend exists the API answers 503. Key format check rejects admin keys (`sk-ant-admin...`).
+- Key validation is a Mock by default. The live check (`GET /v1/models`, no token spend) needs `CPM_ALLOW_LIVE_KEY_TEST=1` plus `live: true` in the request, i.e. Micah's go.
+- Wizard: global budget must be > 0 (this is the mandatory cap of Q1); task <= project <= global; `max_parallel_agents` 1..8 (default 3, Q8); project dir becomes the first approved root and may not overlap the data dir.
+- `mypy --strict` now runs in CI (deferred from WP1). Dependencies are hash-locked in `requirements.lock` (universal, Python 3.12); `setup.ps1` installs from it.
+- Version 0.2.0.
+
 ## 2026-10-21 (WP1) — implementation choices
 - Python target 3.12 (the PC has 3.12.10); code also runs on 3.13 in the cloud. Package name `claude-project-manager`, import name `cpm`, `src/` layout.
 - Money stored as integer micro-dollars (`*_microusd`); status columns are plain strings until WP4.

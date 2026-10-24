@@ -2,6 +2,9 @@
 
 Risk list written before code. Each row: threat, mitigation (the design rule), where it is tested/owned. Severity H/M/L. Update with every WP (CLAUDE.md rules 2 and 6).
 
+## WP2 status (2026-10-24)
+Implemented and tested offline (Linux): T-01 (secret store, redaction, no key in responses/logs/DB/files, 422 handler does not echo input), T-02 (token, Host/Origin allowlists, CSRF, no CORS, WebSocket Origin+token), T-03 (path validator), T-04 (no shell use, grep test), T-09 (hash lockfile, pip-audit, CI staleness check), T-12 (explicit child env, inherited-credential warning at startup). NOT yet verified: Windows Credential Manager backend, Windows junctions, live key test against the real API (all need the PC / Micah's go). New residual risks: T-27 WebSocket token transport undecided (WP15); T-28 the install token sits in `data/install_token` (user-private folder, ACL inherited on Windows; anyone running as Micah can read it, accepted for a local app); T-29 the Mock key check only validates the format, so a wrong key is found at the first live test.
+
 ## Security
 | ID | Sev | Threat | Mitigation | Owner/test |
 |---|---|---|---|---|
