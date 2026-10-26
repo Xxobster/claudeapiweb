@@ -10,7 +10,9 @@ import re
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from cpm.lanes.spec import LANE_ID, LaneSpec
 
 PROFILE_DIR = Path(__file__).resolve().parents[2] / "profiles"
 _NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -43,6 +45,16 @@ class Profile(BaseModel):
     test_commands: list[list[str]] = []
     default_effort: str = "medium"
     pr_body_must_list: list[str] = []
+    # Lane framework (WP12): lane id -> recipe (commands, resources, validators, artifacts, report).
+    lanes: dict[str, LaneSpec] = {}
+
+    @field_validator("lanes")
+    @classmethod
+    def _lane_ids(cls, v: dict[str, LaneSpec]) -> dict[str, LaneSpec]:
+        for lane_id in v:
+            if not LANE_ID.match(lane_id):
+                raise ValueError(f"invalid lane id {lane_id!r}")
+        return v
 
 
 def list_profiles() -> list[str]:

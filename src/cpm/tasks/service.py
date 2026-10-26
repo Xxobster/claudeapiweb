@@ -80,6 +80,7 @@ class TaskData:
     retry_count: int
     source: str
     depends_on: list[int] = field(default_factory=list)
+    lane: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     started_at: datetime | None = None
@@ -184,6 +185,7 @@ class TaskService:
             retry_count=t.retry_count,
             source=t.source,
             depends_on=self._deps(s, t.id),
+            lane=t.lane,
             created_at=t.created_at,
             updated_at=t.updated_at,
             started_at=t.started_at,
@@ -219,6 +221,21 @@ class TaskService:
         return True
 
     # ---------------------------------------------------------------- create / read
+    def _check_lane(self, s: Session, project_id: int, lane: str | None) -> str | None:
+        """A lane must be one the project's profile defines (WP12); None or "" = no lane."""
+        if lane is None or lane == "":
+            return None
+        from cpm.profiles import ProfileError, load_profile
+
+        project = s.get(Project, project_id)
+        try:
+            lanes = load_profile(project.profile).lanes if project and project.profile else {}
+        except ProfileError:
+            lanes = {}
+        if lane not in lanes:
+            raise InvalidTask(f"lane {lane!r} is not defined by the project's profile")
+        return lane
+
     def create(
         self,
         project_id: int,
@@ -237,6 +254,7 @@ class TaskService:
         parent_id: int | None = None,
         source: str = "manual",
         source_ref: str | None = None,
+        lane: str | None = None,
     ) -> TaskData:
         _check_choice(effort, EFFORTS, "effort")
         _check_choice(billing_mode, BILLING, "billing_mode")
@@ -261,6 +279,7 @@ class TaskService:
                 parent_id=parent_id,
                 source=source,
                 source_ref=source_ref,
+                lane=self._check_lane(s, project_id, lane),
                 status="BACKLOG",
             )
             s.add(t)
@@ -422,12 +441,15 @@ class TaskService:
         """Edit fields. Scope, model, effort and billing mode only while no worker is attached."""
         allowed = {
             "title", "description", "priority", "role", "model", "effort", "billing_mode",
-            "declared_scope", "acceptance", "estimate_microusd",
+            "declared_scope", "acceptance", "estimate_microusd", "lane",
         }  # fmt: skip
         unknown = set(changes) - allowed
         if unknown:
             raise InvalidTask(f"cannot edit: {sorted(unknown)}")
-        locked = {"declared_scope", "model", "effort", "billing_mode", "role", "estimate_microusd"}
+        locked = {
+            "declared_scope", "model", "effort", "billing_mode", "role", "estimate_microusd",
+            "lane",
+        }  # fmt: skip
         with _graph_lock, Session(self.engine) as s:
             t = self._get(s, task_id)
             if t.status in states.TERMINAL or t.status in ("COMPLETED",):
@@ -458,6 +480,8 @@ class TaskService:
                 t.acceptance = json.dumps(clean_acceptance(changes["acceptance"]))
             if "estimate_microusd" in changes:
                 t.estimate_microusd = _check_estimate(changes["estimate_microusd"])
+            if "lane" in changes:
+                t.lane = self._check_lane(s, t.project_id, changes["lane"])
             self._log(s, t, "task.edited", actor=actor, fields=sorted(changes))
             s.commit()
             return self._snap(s, t)

@@ -21,12 +21,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from cpm.lanes.commands import hook_from_json
 from cpm.workers.permissions import Decision, ToolContext, decide, non_idempotent_step
 
 Emit = Callable[..., None]
 SCENARIOS = (
     "success", "fail", "hang", "crash", "budget_burst", "grandchild", "slow", "sdk_budget_error",
-    "half_done",
+    "half_done", "files",
 )  # fmt: skip
 
 
@@ -50,6 +51,7 @@ class RunSpec:
     max_turns: int = 40
     resume_session_id: str | None = None
     heartbeat_s: float = 5.0
+    lane: dict[str, Any] | None = None  # WP12: {"lane", "commands", "assets"}; no secret
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -108,6 +110,23 @@ class MockProvider:
         self._write_output()
         self._usage(1_000)
         return self._result(True, "mock work done")
+
+    def _s_files(self) -> int:
+        """Lane tests: write `scenario_args["files"]` ({path: text | byte count}) in the worktree
+        and finish with `scenario_args["report"]` as the final answer."""
+        from cpm.security.paths import resolve_within
+
+        self._start()
+        for rel, content in dict(self.spec.scenario_args.get("files", {})).items():
+            out = resolve_within(Path(self.spec.worktree), rel)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(content, int):
+                out.write_bytes(b"\x00\x01" * (content // 2) + b"\x00" * (content % 2))
+            else:
+                out.write_text(str(content), encoding="utf-8")
+            self.emit("tool_use", name="Write", input={"file_path": rel})
+        self._usage(1_000)
+        return self._result(True, str(self.spec.scenario_args.get("report", "files written")))
 
     def _s_fail(self) -> int:
         self._start()
@@ -175,7 +194,9 @@ class AgentSdkProvider:
 
     def __init__(self, spec: RunSpec, emit: Emit, stop: threading.Event) -> None:
         self.spec, self.emit, self.stop = spec, emit, stop
-        self.ctx = ToolContext(Path(spec.worktree), tuple(spec.scope), spec.trusted)
+        self.ctx = ToolContext(
+            Path(spec.worktree), tuple(spec.scope), spec.trusted, hook_from_json(spec.lane)
+        )
         self._seen: set[str] = set()
 
     def run(self) -> int:

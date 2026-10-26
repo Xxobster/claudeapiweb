@@ -19,6 +19,7 @@ from cpm.api import (
     budget,
     credentials,
     dashboard,
+    lanes,
     locks,
     projects,
     recovery,
@@ -32,6 +33,7 @@ from cpm.api import (
 from cpm.config import Settings, load_settings
 from cpm.db.engine import make_engine
 from cpm.db.migrate import upgrade
+from cpm.lanes.service import LaneService
 from cpm.locks.admission import Admission
 from cpm.locks.boardpr import JobBoardService
 from cpm.locks.external import ExternalWatcher
@@ -110,7 +112,10 @@ def create_app(
     app.state.secrets = secret_store or KeyringSecretStore()
     app.state.key_validator = key_validator or MockKeyValidator()
     app.state.live_validator = HttpKeyValidator()
-    app.state.supervisor = RunSupervisor(engine, settings, app.state.secrets)
+    app.state.lanes = LaneService(engine)
+    app.state.supervisor = RunSupervisor(
+        engine, settings, app.state.secrets, lanes=app.state.lanes
+    )
     app.state.reservations = ReservationService(
         engine, liveness=lambda task_id: app.state.supervisor.live_run_for_task(task_id) is not None
     )
@@ -121,7 +126,9 @@ def create_app(
         reservations=app.state.reservations,
     )
     app.state.admission = Admission(engine, app.state.reservations)
-    app.state.gate = GateService(engine, app.state.supervisor, app.state.supervisor.worktrees)
+    app.state.gate = GateService(
+        engine, app.state.supervisor, app.state.supervisor.worktrees, lanes=app.state.lanes
+    )
     app.state.integration = IntegrationService(
         engine, app.state.supervisor.worktrees, app.state.secrets
     )
@@ -129,6 +136,7 @@ def create_app(
     app.state.scheduler = Scheduler(
         engine, app.state.supervisor, app.state.admission, app.state.reservations,
         ExternalWatcher(engine), gate=app.state.gate,
+        resources_for=app.state.lanes.resources, start_args_for=app.state.lanes.start_args,
     )  # fmt: skip
     app.state.tickets = TicketStore()
 
@@ -144,6 +152,7 @@ def create_app(
     app.include_router(tasks.router)
     app.include_router(runs.router)
     app.include_router(review.router)
+    app.include_router(lanes.router)
     app.include_router(locks.router)
     app.include_router(scheduler.router)
     app.include_router(recovery.router)

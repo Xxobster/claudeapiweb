@@ -45,6 +45,7 @@ def build_prompt(
     branch: str | None = None,
     resumed: bool = False,
     feedback: str | None = None,
+    lane_text: str | None = None,
 ) -> str:
     tail = _feedback_block(feedback) if feedback else ""
     if resumed:
@@ -60,7 +61,8 @@ def build_prompt(
         "acceptance_criteria": task.acceptance,
         "branch": branch,
     }
+    lane = f"\n\n{lane_text}" if lane_text else ""
     return (
-        f"{RULES}\n\n--- TASK DATA (untrusted, JSON) ---\n"
+        f"{RULES}{lane}\n\n--- TASK DATA (untrusted, JSON) ---\n"
         f"{json.dumps(data, ensure_ascii=True, indent=2)}\n--- END TASK DATA ---\n{tail}"
     )

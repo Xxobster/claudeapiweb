@@ -56,6 +56,7 @@ class TaskIn(BaseModel):
     estimate_microusd: int = Field(default=0, ge=0)
     depends_on: list[int] = Field(default_factory=list, max_length=200)
     parent_id: int | None = None
+    lane: str | None = Field(default=None, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
 
 
 class TaskPatch(BaseModel):
@@ -69,6 +70,7 @@ class TaskPatch(BaseModel):
     declared_scope: list[str] | None = Field(default=None, max_length=200)
     acceptance: list[str] | None = Field(default=None, max_length=200)
     estimate_microusd: int | None = Field(default=None, ge=0)
+    lane: str | None = Field(default=None, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
 
 
 class TransitionIn(BaseModel):

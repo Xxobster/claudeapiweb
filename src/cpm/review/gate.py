@@ -32,6 +32,8 @@ from sqlalchemy.orm import Session
 from cpm.db.models import Event, GateResult, Project, Task
 from cpm.db.settings_repo import get_setting
 from cpm.discovery.commands import detect_commands
+from cpm.lanes.registry import ChangedFile
+from cpm.lanes.service import LaneContext, LaneError, LaneService
 from cpm.profiles import ProfileError, load_profile
 from cpm.review import gitops
 from cpm.review.reviewer import (
@@ -98,7 +100,9 @@ class _Ctx:
     snap: gitops.Snapshot
 
 
-def classify(change: gitops.Change, scope: list[str]) -> str | None:
+def classify(
+    change: gitops.Change, scope: list[str], large_ok: bool = False
+) -> str | None:
     """Why a changed file is unexpected, or None if it is fine."""
     parts = change.path.split("/")
     if any(p in ("", ".", "..") for p in parts):
@@ -114,7 +118,7 @@ def classify(change: gitops.Change, scope: list[str]) -> str | None:
         )
         if not ok:
             return "outside the declared scope"
-    if change.size > gitops.LARGE_FILE_BYTES:
+    if change.size > gitops.LARGE_FILE_BYTES and not large_ok:
         return "large binary or file (project LFS policy)"
     return None
 
@@ -131,8 +135,10 @@ class GateService:
         worktrees: WorktreeManager,
         reviewers: ReviewerSource | None = None,
         runner: TestRunner | None = None,
+        lanes: LaneService | None = None,
     ) -> None:
         self.engine = engine
+        self.lanes = lanes or LaneService(engine)
         self.supervisor = supervisor
         self.worktrees = worktrees
         self.reviewers = reviewers or ReviewerSource()
@@ -260,10 +266,23 @@ class GateService:
                 "the worker finished without changing any file",
             )
 
+        try:
+            lane = self.lanes.context(task.project_id, task.lane)
+        except LaneError as exc:
+            summary["reason"] = str(exc)
+            return self._waiting(
+                task, "lane_error", ctx.snap, summary, f"{exc}; fix the profile or the task's lane"
+            )
         unexpected = [
             {"path": c.path, "why": why}
             for c in ctx.snap.changes
-            if (why := classify(c, task.declared_scope))
+            if (
+                why := classify(
+                    c,
+                    task.declared_scope,
+                    large_ok=lane is not None and self.lanes.allows_large(lane, c.path, c.size),
+                )
+            )
         ]
         summary["unexpected"] = unexpected[:MAX_SUMMARY_FILES]
         if unexpected:
@@ -279,6 +298,11 @@ class GateService:
                 fb,
                 fingerprint("unexpected_files", "|".join(sorted(u["path"] for u in unexpected))),
             )
+
+        if lane is not None:
+            blocked = self._lane_step(task, lane, ctx, summary)
+            if blocked is not None:
+                return blocked
 
         tests = self._run_tests(ctx)
         summary["tests"] = tests
@@ -353,6 +377,32 @@ class GateService:
         return self._complete(task, "REVIEWING", ctx.snap, summary, "independent review passed")
 
     # ------------------------------------------------------------------ steps
+    def _lane_step(
+        self, task: TaskData, lane: LaneContext, ctx: _Ctx, summary: dict[str, Any]
+    ) -> GateOutcome | None:
+        """The lane's artifact policy, validators and report format. None = they passed."""
+        changes = [ChangedFile(c.path, c.status, c.size, c.mode) for c in ctx.snap.changes]
+        report = self.lanes.report_text(self.supervisor, task.id)
+        check = self.lanes.check(lane, ctx.worktree, changes, report)
+        summary["lane"] = {"id": lane.lane_id, **check.as_dict()}
+        if check.status == "passed":
+            return None
+        if check.status == "waiting":
+            if check.unavailable:
+                msg = f"a lane check could not run on this PC: {check.unavailable}"
+            else:
+                msg = (
+                    "binary files need your decision before they are committed (project binary "
+                    "policy): " + ", ".join(check.decisions[:5])
+                )
+            return self._waiting(task, "lane_waiting", ctx.snap, summary, msg)
+        errors = (f for f in check.findings if f.severity == "error")
+        key = "|".join(sorted(f"{f.code}:{f.path}" for f in errors))
+        return self._correct(
+            task, "TESTING", "lane_failed", ctx.snap, summary, check.feedback(),
+            fingerprint("lane_failed", key),
+        )
+
     def _context(self, task: TaskData) -> _Ctx:
         with Session(self.engine) as s:
             project = s.get(Project, task.project_id)
