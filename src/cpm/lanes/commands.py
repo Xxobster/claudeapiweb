@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from cpm.lanes.spec import CommandRule, LaneSpec
+from cpm.lanes.spec import CommandRule, LaneSpec, is_script, script_path
 
 if TYPE_CHECKING:
     from cpm.workers.permissions import Decision, ToolContext
@@ -54,6 +54,12 @@ def _check_path(ctx: ToolContext, tok: str, *, out: bool, assets: Sequence[str])
     return None
 
 
+def _real_inside_script(ctx: ToolContext, rel: str) -> bool:
+    from cpm.workers.permissions import _real_inside
+
+    return _real_inside(ctx, rel) and (Path(ctx.worktree) / rel).is_file()
+
+
 def match_rule(
     rule: CommandRule, tokens: list[str], ctx: ToolContext, assets: Sequence[str]
 ) -> Decision | None:
@@ -63,7 +69,12 @@ def match_rule(
     def no(why: str) -> Decision:
         return Decision(False, f"lane command {rule.name!r}: {why}")
 
-    if tokens[0].casefold().removesuffix(".exe") != rule.program.casefold().removesuffix(".exe"):
+    if is_script(rule.program):
+        if tokens[0] not in (script_path(rule.program), "./" + script_path(rule.program)):
+            return None
+        if not _real_inside_script(ctx, script_path(rule.program)):
+            return no("the script is not a regular file inside the worktree")
+    elif tokens[0].casefold().removesuffix(".exe") != rule.program.casefold().removesuffix(".exe"):
         return None
     rest = tokens[1:]
     if rest[: len(rule.prefix)] != rule.prefix:

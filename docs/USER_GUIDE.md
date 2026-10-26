@@ -105,11 +105,11 @@ A **lane** is a recipe for one kind of work (voice lines, 3D assets, maps, Unity
 - **resources**: `gpu`, `unity_editor`, `blender`, `device`... These make the task heavy: one at a time, never while `BUILD_RUNNING.lock` or another Nirandyr lock exists;
 - **commands**: the only extra commands the worker may run (exact program, listed options, paths inside its worktree). Everything else stays refused;
 - **artifacts**: folders outputs must go to, allowed extensions, size limit and the **binary policy** (`ask` = the gate stops and asks you, `lfs_only`, `deny`);
-- **validators**: checks run by the acceptance gate on the outputs (`files_exist`, `file_size`, `name_pattern`, `json_keys` built in; voice ones: see below; 3D/map/Unity ones come with their lanes);
+- **validators**: checks run by the acceptance gate on the outputs (`files_exist`, `file_size`, `name_pattern`, `json_keys` built in; voice/3D/map/Unity ones come with their lanes);
 - **report**: headings the worker's final answer must contain; **limits**: run time and hang timeout; **queue_bias**: number added to the task priority in the scheduler (higher = later).
-Use it: `GET /api/projects/{id}/lanes` lists a project's lanes (and what is missing on this PC), `POST /api/projects/{id}/lanes/{lane}/tasks` with `{"title": ..., "inputs": {...}}` creates a task from the template (it starts in BACKLOG like any task). In the gate, failed checks go back to the worker as a correction; binaries awaiting your decision, or checks that cannot run on this PC, leave the task in TESTING with the reason. There is no lane screen yet.
+Use it: `GET /api/projects/{id}/lanes` lists a project's lanes (and what is missing on this PC), `POST /api/projects/{id}/lanes/{lane}/tasks` with `{"title": ..., "inputs": {...}}` creates a task from the template (it starts in BACKLOG like any task). In the gate, failed checks go back to the worker as a correction; binaries awaiting your decision, or checks that cannot run on this PC, leave the task in TESTING with the reason. Lane screen (v0.15.1): project page, tab "Lanes", shows each lane's resources, allowed commands, validators, artifact and binary policy, report format and whether this PC is ready (missing tools/paths); read-only, the profile is the only place a lane changes. A task that has a lane shows a lane box on its page, and the acceptance gate history shows the lane checks (passed / failed / waiting, findings, binaries awaiting your decision).
 
-### Voice lane (`voice`, Nirandyr, v0.16.0)
+### Voice lane (`voice`, Nirandyr, v0.17.0)
 Renders the fixed voice lines with Nirandyr's own local pipeline (free, no paid voice API) and checks the result. Create a task with `POST /api/projects/{id}/lanes/voice/tasks`.
 - **Commands** the worker may run, exactly these two: `python tools/voice/render_fixed.py --check` and `python tools/voice/render_fixed.py` (no other flag, script or tool; trusted workspace only). Model download, story QC and any other script stay refused.
 - **Priority**: the lane holds the `gpu` resource (one heavy task at a time, never while `BUILD_RUNNING.lock` or a gpu-lock exists) and has `queue_bias: 500`, so every ordinary task, build or art task goes first (Nirandyr rules 26, 27, 49). A voice task that is waiting simply starts as soon as the GPU is free; the render resumes (already valid lines are skipped). A voice task that FAILED is not restarted for you while it is API-billed (that would spend money again): press retry, or add `api` to the scheduler's `retry_billing_modes` if you want rule 49 fully automatic.
@@ -128,3 +128,10 @@ Only the skeleton: `/health`, database with all core tables, migrations, redacte
 
 ## Developer commands
 `pip install -e ".[dev]"`, `ruff check .`, `pytest -m "not windows"`.
+
+## Nirandyr lanes: 3D, maps, Unity validation (v0.16.0)
+Three lanes ship in `profiles/nirandyr.yaml`. Create a task with `POST /api/projects/{id}/lanes/{lane}/tasks` (lane = `three_d`, `maps` or `unity_validation`); it starts in BACKLOG like any task and is heavy (one at a time, never while `BUILD_RUNNING.lock` or another Nirandyr lock exists).
+- **three_d**: the worker runs the project's Blender batch script (fixed arguments) and writes models to `Assets/Art/Generated/`. The gate checks that each model opens and its triangle count, UVs, scale, size and names; binaries wait for your decision.
+- **maps**: the worker only runs `tools/sim/zone_gen.sh --world` to verify the frozen map and writes a report under `docs/jobs/map_verify/`. Any change to a golden file fails the task.
+- **unity_validation**: the worker runs Edit Mode tests in batch mode on its own worktree. The gate reads the test XML and editor log (failed tests, compile errors, missing scripts) and checks `.meta` files (missing, orphan, duplicate GUID).
+Before the first run, look at the profile once on the PC: the Blender path and script names, the generator options and the golden paths are assumptions (a wrong one makes the task wait or fail with a clear reason, it never runs something else).

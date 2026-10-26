@@ -18,6 +18,11 @@ from cpm.security.paths import PathPolicyError, validate_relative
 
 LANE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _PROGRAM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+# A reviewed in-repo shell script (e.g. `tools/sim/zone_gen.sh`), typed exactly like this (an
+# optional leading './' is ignored). Only `.sh`, only relative, never inside the lane's outputs.
+_SCRIPT = re.compile(
+    r"^(?:\./)?(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}/){1,8}[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.sh$"
+)
 _FLAG = re.compile(r"^-{1,2}[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EXT = re.compile(r"^\.[a-z0-9]{1,12}$")
 _SECTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _/&.-]{0,59}$")
@@ -38,6 +43,14 @@ FlagKind = Literal["none", "value", "path", "out_path"]
 PositionalKind = Literal["none", "path", "out_path"]
 BinaryPolicy = Literal["ask", "lfs_only", "deny"]
 DEFAULT_VALUE_PATTERN = r"^[A-Za-z0-9_.:=,+@/-]{1,200}$"
+
+
+def is_script(program: str) -> bool:
+    return "/" in program
+
+
+def script_path(program: str) -> str:
+    return program[2:] if program.startswith("./") else program
 
 
 class Strict(BaseModel):
@@ -74,8 +87,12 @@ class CommandRule(Strict):
     @field_validator("program")
     @classmethod
     def _program(cls, v: str) -> str:
+        if _SCRIPT.match(v) and ".." not in v.split("/"):
+            return v
         if not _PROGRAM.match(v):
-            raise ValueError("program must be a plain command name, not a path or a pattern")
+            raise ValueError(
+                "program must be a plain command name or a relative in-repo .sh script path"
+            )
         if v.casefold().removesuffix(".exe") in FORBIDDEN_PROGRAMS:
             raise ValueError(f"program {v!r} can never be allowed in a lane")
         return v
@@ -109,6 +126,8 @@ class CommandRule(Strict):
 
     @model_validator(mode="after")
     def _interpreter(self) -> CommandRule:
+        if is_script(self.program) and not self.needs_trust:
+            raise ValueError("an in-repo script runs repository code: set needs_trust: true")
         base = self.program.casefold().removesuffix(".exe")
         if base in INTERPRETERS and (not self.prefix or self.positional != "none" or self.flags):
             raise ValueError(
@@ -238,6 +257,14 @@ class LaneSpec(Strict):
         res = [(r.type, r.name) for r in self.resources]
         if len(res) != len(set(res)):
             raise ValueError("duplicate resource")
+        outputs = [a.strip("/") for a in self.assets()]
+        for c in self.commands:
+            if is_script(c.program) and any(
+                script_path(c.program) == o or script_path(c.program).startswith(o + "/")
+                for o in outputs
+                if o
+            ):
+                raise ValueError(f"script {c.program} lies inside the lane's output paths")
         return self
 
     def assets(self) -> list[str]:

@@ -19,6 +19,9 @@ from sqlalchemy.orm import Session
 
 from cpm.db.models import Project
 from cpm.lanes import validators as _builtin  # noqa: F401  (registers the built-in validators)
+from cpm.lanes import validators_3d as _v3d  # noqa: F401  (WP14)
+from cpm.lanes import validators_map as _vmap  # noqa: F401  (WP14)
+from cpm.lanes import validators_unity as _vunity  # noqa: F401  (WP14)
 from cpm.lanes import voice as _voice  # noqa: F401  (registers the voice validators)
 from cpm.lanes.artifacts import check_artifacts
 from cpm.lanes.commands import describe, serialise

@@ -42,3 +42,4 @@ pre.diff div{padding:0 .6rem;white-space:pre-wrap;word-break:break-word}
 pre.diff .da{background:rgba(26,127,75,.15)}pre.diff .dd{background:rgba(180,35,24,.15)}pre.diff .dk{color:var(--accent)}pre.diff .dh{color:var(--muted);font-weight:600}
 h3{font-size:.95rem;margin:.8rem 0 .3rem}
 @media (max-width:600px){main{padding:.6rem}}
+h4{font-size:.85rem;margin:.7rem 0 .2rem;color:var(--muted);text-transform:uppercase}code{font-size:.85em}th{white-space:nowrap}details{margin-top:.5rem}

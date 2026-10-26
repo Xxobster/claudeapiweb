@@ -113,9 +113,7 @@ def create_app(
     app.state.key_validator = key_validator or MockKeyValidator()
     app.state.live_validator = HttpKeyValidator()
     app.state.lanes = LaneService(engine)
-    app.state.supervisor = RunSupervisor(
-        engine, settings, app.state.secrets, lanes=app.state.lanes
-    )
+    app.state.supervisor = RunSupervisor(engine, settings, app.state.secrets, lanes=app.state.lanes)
     app.state.reservations = ReservationService(
         engine, liveness=lambda task_id: app.state.supervisor.live_run_for_task(task_id) is not None
     )

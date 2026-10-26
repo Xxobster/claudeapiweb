@@ -122,9 +122,16 @@
 - A lane whose tool is missing on the PC is deferred (like a refused budget), not failed. A lane check that cannot run on this PC makes the gate wait instead of passing.
 - Version 0.15.0, migration 0007. No real API or GitHub call was made.
 
+## 2026-10-26 (WP14) - implementation choices (awaiting Micah only if he disagrees)
+- T-20 answered earlier (workers may run Unity, Blender and GPU tools under Nirandyr's locks) is applied as follows: three lanes in the Nirandyr profile, each with fixed commands and heavy resources, so they wait for `BUILD_RUNNING.lock` and run one at a time. Nothing here starts a tool by itself: a person creates a lane task.
+- Maps: the lane only VERIFIES (`tools/sim/zone_gen.sh --world`, fixed arguments) against the golden files; the map is frozen (decision 413), so any change to a golden file fails the task. `dungeon_gen.sh` is not allowed here; it will be its own lane.
+- Unity: Edit Mode tests only, on the task's own worktree, results judged from the NUnit XML, editor log and `.meta` files; the gate fails on a failed test, a compile error, a missing script/GUID or a missing/duplicate `.meta`.
+- 3D: the Blender batch script exports, CPM judges the files (GLB triangle count, UV, unit scale, size, names); big binaries still ask you first.
+- Several file names and paths in these lanes are guesses about the Nirandyr repo (see IMPACT_MAP 2k); they are fixed by editing `profiles/nirandyr.yaml` after one look on the PC.
+- Version 0.16.0, no migration. No real API, GitHub, Blender or Unity call was made.
 ## 2026-10-26 (WP13) - implementation choices (awaiting Micah only if he disagrees)
 - The voice lane is a profile entry (`lanes.voice` in `profiles/nirandyr.yaml`) plus four validators; the engine gained one generic field, `queue_bias`, so "voice is the lowest priority" (Nirandyr rule 49) is a scheduler rule, not a special case.
 - Only two commands are allowed: `python tools/voice/render_fixed.py [--check]`, exact, trusted workspace only. No `fetch_kokoro.sh`, `story_qc.py` or `make_ab.py` until they are reviewed and their arguments are known.
 - "Restart when the GPU is free" = a READY voice task waits behind the locks and starts when they clear, and the render itself resumes. A FAILED API-billed voice task is not auto-restarted (WP9 decision: no repeated spending without a person); the existing scheduler setting `retry_billing_modes` can include `api` if Micah wants it.
 - Loudness is gated RMS + sample peak in dBFS, not LUFS (no extra dependency). `.rva` is not decoded.
-- Version 0.16.0, no migration. No real API or GitHub call was made.
+- Version 0.17.0, no migration. No real API or GitHub call was made.
