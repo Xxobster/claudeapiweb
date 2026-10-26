@@ -143,6 +143,25 @@ try {
   await a.click(`[data-project='${alphaId}'] >> text=Release`);
   await a.waitForSelector(`[data-project='${alphaId}'] >> text=No claim`, { timeout: 5000 });
 
+  // 6e. Scheduler screen (WP7 API): queue order, refusal reason, limits, API auto-retry toggle (mock tasks only).
+  const sched = (await post(`/api/projects/${alphaId}/tasks`, { title: "sched waits", billing_mode: "api" }));
+  await post(`/api/tasks/${sched.id}/transition`, { to: "READY" });
+  await post("/api/scheduler/pause", {});
+  await a.goto(`${base}/#/scheduler`);
+  await a.waitForSelector("text=paused: nothing new starts");
+  await a.waitForSelector(`td:has-text('sched waits')`);
+  await a.waitForSelector("text=Workers at once");
+  await a.waitForSelector("text=Automatic retry of API tasks:");
+  await a.click("button:has-text('Resume')");
+  await a.waitForSelector("text=running", { timeout: 5000 });
+  await a.click("button:has-text('Run one pass')");
+  await a.waitForSelector("td >> text=deferred: ", { timeout: 8000 }).catch(async (e) => { console.log(await a.textContent("main")); throw e; });  // API task refused: live runs are off, shown with its reason
+  a.once("dialog", (d) => d.accept());
+  await a.click("text=Turn on automatic retry for API tasks");
+  await a.waitForSelector("text=Turn off automatic retry for API tasks");
+  await a.click("text=Turn off automatic retry for API tasks");
+  await a.waitForSelector("text=Turn on automatic retry for API tasks");
+
   assert.deepEqual(errors, [], errors.join("\n"));  // no page or console error while connected
 
   // 7. Disconnected state.

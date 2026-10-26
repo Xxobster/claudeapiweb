@@ -259,3 +259,36 @@ def test_stop_drains_and_blocks_new_ticks(senv):
     senv.sched.stop()
     rep = senv.sched.tick()
     assert rep.errors == ["scheduler is stopping"] and rep.started == []
+
+
+def test_queue_view_orders_and_explains_waiting_tasks(senv):
+    DesktopClaims(senv.engine).add(senv.pid, "Assets/Game/UI/")
+    late = senv.task("late", scope=["z/"], priority=200, slow=2)
+    ui = senv.task("ui", scope=["Assets/Game/UI/menu.prefab"], priority=50)
+    api_t = senv.task("api", scope=["x/"], priority=100, billing_mode="api")
+    before = senv.sched.queue()
+    assert [r["task_id"] for r in before["ready"]] == [ui.id, api_t.id, late.id]
+    assert [r["position"] for r in before["ready"]] == [1, 2, 3]
+    assert all(r["reason"] is None for r in before["ready"]) and before["running"] == []
+    senv.sched.tick()
+    q = senv.sched.queue()
+    by = {r["task_id"]: r for r in q["ready"]}
+    assert "Desktop claim" in by[ui.id]["reason"]
+    assert by[api_t.id]["reason"].startswith("deferred:") and by[api_t.id]["backoff_s"] > 0
+    assert by[api_t.id]["refused_starts"] == 1
+    assert [r["task_id"] for r in q["running"]] == [late.id]
+    senv.finish_all()
+    # after the next tick the reason survives from the stored events, not just the last pass
+    senv.sched._last = None
+    again = {r["task_id"]: r for r in senv.sched.queue()["ready"]}
+    assert again[ui.id]["reason_source"] == "event" and "Desktop claim" in again[ui.id]["reason"]
+
+
+def test_queue_view_previews_automatic_retry(senv):
+    senv.sched.set_config({"retry_delay_s": 0, "max_auto_retries": 0})
+    t = senv.task("flaky", scope=["f/"])
+    senv.args[t.id] = {"scenario": "fail", "heartbeat_s": 0.2}
+    senv.sched.tick()
+    senv.finish(t.id)
+    row = senv.sched.queue()["failed"][0]
+    assert row["task_id"] == t.id and row["action"] == "give_up" and "limit" in row["why"]
