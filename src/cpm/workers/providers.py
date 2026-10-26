@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cpm.lanes.commands import hook_from_json
 from cpm.workers.permissions import Decision, ToolContext, decide, non_idempotent_step
@@ -229,13 +229,13 @@ class AgentSdkProvider:
         options = sdk.ClaudeAgentOptions(
             cwd=s.worktree,
             model=s.model,
-            effort=s.effort,
+            effort=cast("Any", s.effort),
             permission_mode="default",
             tools=["Read", "Grep", "Glob", "Edit", "Write", "MultiEdit", "Bash", "TodoWrite"],
             allowed_tools=[],
             disallowed_tools=["WebFetch", "WebSearch", "Task", "Agent", "NotebookEdit"],
             can_use_tool=self._can_use,
-            setting_sources=list(s.setting_sources),
+            setting_sources=cast("Any", list(s.setting_sources)),
             max_turns=s.max_turns,
             max_budget_usd=s.max_budget_usd,
             resume=s.resume_session_id,
