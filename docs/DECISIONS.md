@@ -121,3 +121,11 @@
 - Binary outputs (audio, models, textures) default to `ask`: the gate stops and tells you which files need your decision (Nirandyr rules on binaries). `lfs_only` accepts them when `.gitattributes` routes them to Git LFS; `deny` refuses them. CPM never edits `.gitattributes` or installs LFS.
 - A lane whose tool is missing on the PC is deferred (like a refused budget), not failed. A lane check that cannot run on this PC makes the gate wait instead of passing.
 - Version 0.15.0, migration 0007. No real API or GitHub call was made.
+
+## 2026-10-26 (WP14) - implementation choices (awaiting Micah only if he disagrees)
+- T-20 answered earlier (workers may run Unity, Blender and GPU tools under Nirandyr's locks) is applied as follows: three lanes in the Nirandyr profile, each with fixed commands and heavy resources, so they wait for `BUILD_RUNNING.lock` and run one at a time. Nothing here starts a tool by itself: a person creates a lane task.
+- Maps: the lane only VERIFIES (`tools/sim/zone_gen.sh --world`, fixed arguments) against the golden files; the map is frozen (decision 413), so any change to a golden file fails the task. `dungeon_gen.sh` is not allowed here; it will be its own lane.
+- Unity: Edit Mode tests only, on the task's own worktree, results judged from the NUnit XML, editor log and `.meta` files; the gate fails on a failed test, a compile error, a missing script/GUID or a missing/duplicate `.meta`.
+- 3D: the Blender batch script exports, CPM judges the files (GLB triangle count, UV, unit scale, size, names); big binaries still ask you first.
+- Several file names and paths in these lanes are guesses about the Nirandyr repo (see IMPACT_MAP 2k); they are fixed by editing `profiles/nirandyr.yaml` after one look on the PC.
+- Version 0.16.0, no migration. No real API, GitHub, Blender or Unity call was made.
