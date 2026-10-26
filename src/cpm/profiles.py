@@ -38,6 +38,9 @@ class Profile(BaseModel):
     # name -> absolute folder; any `*.lock` file inside means the same (gpu_lock.sh files)
     lock_dirs: dict[str, str] = {}
     heavy_resources: list[str] = []
+    # Test commands the acceptance gate runs in the task worktree (argument lists, never strings).
+    # Empty = use what `discovery.commands` detects. Only run for a trusted workspace.
+    test_commands: list[list[str]] = []
     default_effort: str = "medium"
     pr_body_must_list: list[str] = []
 

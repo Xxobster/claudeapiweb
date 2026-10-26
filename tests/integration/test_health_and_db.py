@@ -21,7 +21,7 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["db_revision"] == "0004"
+    assert body["db_revision"] == "0005"
 
 
 def test_migrations_up_down(tmp_path):

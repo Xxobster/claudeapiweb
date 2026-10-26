@@ -22,6 +22,7 @@ from cpm.api import (
     locks,
     projects,
     recovery,
+    review,
     runs,
     scheduler,
     tasks,
@@ -38,6 +39,8 @@ from cpm.logging_setup import configure_logging
 from cpm.providers.keycheck import HttpKeyValidator, KeyValidator, MockKeyValidator
 from cpm.recovery.backup import create_backup
 from cpm.recovery.reconcile import Recovery
+from cpm.review.gate import GateService
+from cpm.review.integrate import IntegrationService
 from cpm.scheduler.core import Scheduler, run_forever
 from cpm.security.childenv import inherited_credential_vars
 from cpm.security.middleware import SecurityMiddleware
@@ -89,6 +92,7 @@ def create_app(
                 await loop_task
             # cancelling the await does not stop a tick running in its thread: drain it first
             await asyncio.to_thread(app.state.scheduler.stop)
+        app.state.gate.wait_idle(2.0)
         app.state.supervisor.shutdown()
         engine.dispose()
 
@@ -116,9 +120,13 @@ def create_app(
         reservations=app.state.reservations,
     )
     app.state.admission = Admission(engine, app.state.reservations)
+    app.state.gate = GateService(engine, app.state.supervisor, app.state.supervisor.worktrees)
+    app.state.integration = IntegrationService(
+        engine, app.state.supervisor.worktrees, app.state.secrets
+    )
     app.state.scheduler = Scheduler(
         engine, app.state.supervisor, app.state.admission, app.state.reservations,
-        ExternalWatcher(engine),
+        ExternalWatcher(engine), gate=app.state.gate,
     )  # fmt: skip
     app.state.tickets = TicketStore()
 
@@ -133,6 +141,7 @@ def create_app(
     app.include_router(projects.router)
     app.include_router(tasks.router)
     app.include_router(runs.router)
+    app.include_router(review.router)
     app.include_router(locks.router)
     app.include_router(scheduler.router)
     app.include_router(recovery.router)

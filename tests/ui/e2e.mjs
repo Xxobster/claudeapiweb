@@ -162,6 +162,30 @@ try {
   await a.click("text=Turn off automatic retry for API tasks");
   await a.waitForSelector("text=Turn on automatic retry for API tasks");
 
+  // 6f. Review (WP10): a finished mock task is judged by the gate, its diff is shown, publishing without a remote is refused.
+  const rv = await post(`/api/projects/${alphaId}/tasks`, { title: "review me", billing_mode: "mock", acceptance: ["the output file exists"] });
+  await post(`/api/tasks/${rv.id}/transition`, { to: "READY" });
+  await post(`/api/tasks/${rv.id}/runs`, { scenario: "success" });
+  await a.goto(`${base}/#/task/${rv.id}`);
+  await a.waitForSelector("#gate-run", { timeout: 15000 }).catch(async () => { await a.goto(`${base}/#/task/${rv.id}`); await a.waitForSelector("#gate-run", { timeout: 10000 }); });
+  await a.waitForSelector(`td:text-is('mock_output_task${rv.id}.txt')`);
+  await a.click(`tr:has-text('mock_output_task${rv.id}.txt') >> text=Diff`);
+  await a.waitForSelector("pre.diff .da:has-text('mock result for task')");
+  await a.click("#gate-run");
+  await a.waitForSelector("text=Independent review (approved)", { timeout: 15000 });
+  await a.waitForSelector("#integrate");
+  await a.fill("#pr-needs-pc", "nothing to do on the PC");
+  a.once("dialog", (d) => d.accept());
+  await a.click("#integrate");
+  await a.waitForSelector("text=origin", { timeout: 10000 });  // banner: this fixture has no github.com remote
+  errors.splice(0, errors.length, ...errors.filter((e) => !/status of 409/.test(e)));  // the refused publish is expected
+  await a.goto(`${base}/#/git`);
+  await a.waitForSelector("text=Waiting for review");
+  await a.waitForSelector(`td:has-text('review me')`);
+  await a.fill("#gh-token", "github_pat_" + "k".repeat(30)); await a.click("text=Save token");
+  await a.waitForSelector("text=Token: saved in the Windows credential store");
+  assert.ok(!(await a.content()).includes("github_pat_kkkk"), "token must not be echoed");
+
   assert.deepEqual(errors, [], errors.join("\n"));  // no page or console error while connected
 
   // 7. Disconnected state.

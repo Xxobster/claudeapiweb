@@ -369,6 +369,7 @@ async function taskView(id) {
     runBox.append(h("p", { class: "muted" }, `No run can start from ${task.status}.`));
   }
 
+  const reviewBox = (await reviewPane(task, () => route())) || null;
   const logBox = h("pre", { class: "log", id: "run-log", "aria-label": "Live worker log" }, latest ? "" : "No run yet.");
   const streamState = h("span", { class: "pill" }, latest ? "…" : "idle");
   show(my, h("h1", null, task.title), h("div", { class: "muted" }, link(`#/project/${task.project_id}/board`, project.name)),
@@ -381,6 +382,7 @@ async function taskView(id) {
     h("div", { class: "card" }, h("p", null, task.description || "No description."), h("h2", null, "Acceptance"), task.acceptance.length ? h("ul", null, task.acceptance.map((a) => h("li", null, a))) : h("p", { class: "muted" }, "None."), h("h2", null, "Declared scope"), task.declared_scope.length ? h("ul", null, task.declared_scope.map((a) => h("li", null, a))) : h("p", { class: "muted" }, "None.")),
     h("h2", null, "Move this task"), moves.length ? controls : h("p", { class: "muted" }, "No move is available to you from this state."),
     runBox,
+    reviewBox,
     h("h2", null, "Runs"),
     runs.length ? h("table", null, h("thead", null, h("tr", null, ["#", "Attempt", "Status", "Model", "Started", "Ended", "Cost (estimate)"].map((t) => h("th", null, t)))),
       h("tbody", null, runs.map((r) => h("tr", null, h("td", null, r.id), h("td", null, r.attempt), h("td", null, r.status), h("td", null, r.model || "—"), h("td", null, when(r.started_at)), h("td", null, when(r.ended_at)), h("td", null, usd(r.cost_microusd)))))) : empty("No run yet."),
@@ -500,13 +502,139 @@ async function costsView() {
     h("p", { class: "muted" }, "USD per million tokens. Check them against the official pricing page before relying on an estimate."));
 }
 
+
+// ---------------------------------------------------------------- review: gate, diff, pull request (WP10)
+const OUTCOME_TEXT = {
+  passed: "passed", tests_failed: "tests failed", review_rejected: "review rejected",
+  unexpected_files: "unexpected files", criteria_missing: "no acceptance criteria", no_changes: "no changes",
+  needs_trust: "workspace not trusted", conflict: "merge conflict", review_pending: "waiting for your review", error: "could not run",
+};
+const outcomePill = (r) => h("span", { class: `pill ${r.outcome === "passed" ? "ok" : r.action === "waiting" ? "warn" : "bad"}` }, OUTCOME_TEXT[r.outcome] || r.outcome);
+const kb = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${(n / 1e3).toFixed(1)} kB` : `${n} B`);
+
+function diffBlock(text, truncated) {
+  const lines = String(text || "").split("\n");
+  const box = h("pre", { class: "diff", "aria-label": "Diff" });
+  for (const line of lines.slice(0, 4000)) {
+    const cls = line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") ? "dh" : line.startsWith("@@") ? "dk" : line.startsWith("+") ? "da" : line.startsWith("-") ? "dd" : "";
+    box.append(h("div", { class: cls }, line === "" ? " " : line));
+  }
+  if (truncated || lines.length > 4000) box.append(h("div", { class: "dk" }, "… diff shortened"));
+  return box;
+}
+
+function gateSummary(r) {
+  const sm = r.summary || {};
+  const out = [];
+  if (sm.reason) out.push(h("p", null, sm.reason));
+  if (sm.unexpected && sm.unexpected.length) out.push(h("div", null, h("strong", null, "Unexpected files: "), h("ul", null, sm.unexpected.map((u) => h("li", null, `${u.path} — ${u.why}`)))));
+  if (sm.tests) {
+    out.push(h("div", null, h("strong", null, "Tests: "), sm.tests.status,
+      (sm.tests.runs || []).map((t) => h("div", { class: "muted" }, `$ ${t.argv.join(" ")} → exit ${t.exit_code}${t.timed_out ? " (timed out)" : ""} in ${t.duration_s} s`)),
+      sm.tests.status === "failed" && sm.tests.runs.length ? h("pre", { class: "log" }, sm.tests.runs[sm.tests.runs.length - 1].tail) : null,
+      sm.tests.status === "skipped" ? h("div", { class: "warn" }, sm.tests.reason) : null));
+  }
+  if (sm.conflicts && sm.conflicts.length) out.push(h("div", { class: "warn" }, `Conflicts with the base: ${sm.conflicts.join(", ")}`));
+  if (sm.review && sm.review.criteria) {
+    out.push(h("div", null, h("strong", null, `Independent review (${sm.review.status}): `), sm.review.summary || "",
+      h("ul", null, sm.review.criteria.map((c) => h("li", { class: c.met ? "ok" : "bad" }, `${c.met ? "met" : "NOT met"}: ${c.text}`, c.note ? h("span", { class: "muted" }, ` — ${c.note}`) : null))),
+      sm.review.issues && sm.review.issues.length ? h("ul", null, sm.review.issues.map((i) => h("li", { class: i.severity === "blocker" ? "bad" : "warn" }, `${i.severity} · ${i.category}: ${i.text}`))) : null));
+  } else if (sm.review && sm.review.reason) out.push(h("div", { class: "warn" }, sm.review.reason));
+  if (sm.gave_up) out.push(h("div", { class: "bad" }, `Stopped: ${sm.gave_up}`));
+  if (sm.correction) out.push(h("div", { class: "muted" }, `Sent back to a worker: correction ${sm.correction.attempt} of ${sm.correction.of}.`));
+  return out;
+}
+
+async function reviewPane(task, onDone) {
+  const id = task.id;
+  const hasWork = ["TESTING", "REVIEWING", "CORRECTING", "COMPLETED", "INTEGRATED", "FAILED", "PAUSED"].includes(task.status);
+  if (!hasWork) return null;
+  const [rv, changes] = await Promise.all([api.get(`/api/tasks/${id}/review`), api.get(`/api/tasks/${id}/changes`).catch((e) => ({ error: e.message }))]);
+  const latest = rv.results[0];
+  const diffBox = h("div", { id: "diff-box" });
+  const showDiff = (path) => act(async () => {
+    const d = await api.get(`/api/tasks/${id}/diff${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+    diffBox.replaceChildren(h("div", { class: "muted" }, path || "whole change"), diffBlock(d.diff, d.truncated));
+  });
+  const head = h("div", { class: "row" },
+    task.status === "TESTING" ? h("button", { class: "primary", id: "gate-run", onclick: () => act(async () => { const r = await api.post(`/api/tasks/${id}/gate`); setBanner(`Gate: ${OUTCOME_TEXT[r.outcome] || r.outcome} — ${r.message}`, r.action === "completed" ? "info" : "error"); }, onDone) }, "Run the acceptance gate") : null,
+    latest && latest.outcome === "review_pending" && task.status === "TESTING"
+      ? h("button", { id: "gate-approve", onclick: () => confirm("No automatic reviewer is available. Approve this result after reading the diff yourself?") && act(() => api.post(`/api/tasks/${id}/gate/approve`, { gate_id: latest.id }), onDone) }, "Approve after my review") : null,
+    rv.running ? h("span", { class: "pill warn" }, "gate running…") : null,
+    h("button", { onclick: () => showDiff(null) }, "View whole diff"));
+  const files = changes.error
+    ? h("p", { class: "muted" }, `No changes to show yet: ${changes.error}`)
+    : changes.files.length
+      ? h("table", null, h("thead", null, h("tr", null, ["File", "Change", "Lines", "Size", "Check", ""].map((t) => h("th", null, t)))),
+        h("tbody", null, changes.files.map((f) => h("tr", null, h("td", null, f.path), h("td", null, f.status), h("td", null, f.added == null ? "binary" : `+${f.added} −${f.deleted}`), h("td", null, kb(f.size)),
+          h("td", null, f.unexpected ? h("span", { class: "pill bad" }, f.unexpected) : h("span", { class: "pill ok" }, "expected")),
+          h("td", null, h("button", { onclick: () => showDiff(f.path) }, "Diff"))))))
+      : h("p", { class: "muted" }, "The worktree has no change yet.");
+  const history = rv.results.length
+    ? rv.results.map((r) => h("div", { class: "card" }, h("div", { class: "row" }, outcomePill(r), h("span", { class: "muted" }, `${when(r.at)} · ${r.action}`)), gateSummary(r)))
+    : [h("p", { class: "muted" }, "The gate has not judged this task yet. It runs by itself when the scheduler is on, or press the button above.")];
+  return h("div", null,
+    h("h2", null, "Review"),
+    changes.error ? null : h("div", { class: "muted" }, `Branch ${changes.branch} against ${changes.base_ref} (${changes.base})${changes.unexpected ? ` · ${changes.unexpected} unexpected file(s)` : ""}`),
+    head, files, diffBox,
+    h("h3", null, `Acceptance gate (up to ${rv.max_corrections} corrections)`), history,
+    integrationBox(task, rv.integration, onDone));
+}
+
+function integrationBox(task, integ, onDone) {
+  const id = task.id;
+  const pr = integ && integ.pr_url && /^https:\/\/github\.com\//.test(integ.pr_url) ? integ.pr_url : null;
+  if (integ && integ.state === "pr_open") {
+    return h("div", { class: "card", id: "integration" }, h("strong", null, "Pull request opened: "), pr ? h("a", { href: pr, rel: "noopener noreferrer", target: "_blank" }, `#${integ.pr_number}`) : `#${integ.pr_number}`,
+      h("div", { class: "muted" }, `branch ${integ.branch}. CPM never merges: review and merge it on GitHub.`));
+  }
+  if (task.status !== "COMPLETED") return null;
+  const note = h("textarea", { id: "pr-needs-pc", maxlength: 2000, placeholder: "What still needs the PC (Unity, devices, a manual check)? Shown in the pull request." });
+  return h("div", { class: "card", id: "integration" }, h("h3", null, "Publish"),
+    integ ? h("div", { class: "note warn" }, `A previous attempt stopped at “${integ.state}”. Retrying continues from there; nothing is pushed twice.`) : null,
+    h("p", { class: "muted" }, "Pushes the task branch (never main, never forced) and opens a pull request with your saved GitHub token. CPM does not merge."),
+    field("What still needs the PC", note),
+    h("p", null, h("button", { class: "primary", id: "integrate", onclick: () => confirm("Push this branch to GitHub and open a pull request?") && act(async () => { const r = await api.post(`/api/tasks/${id}/integrate`, { needs_pc: note.value }); setBanner(`Pull request #${r.pr_number} opened`, "info"); }, onDone) }, "Push branch and open pull request")));
+}
+
+async function reviewQueue() {
+  const list = await api.get("/api/projects");
+  const per = await Promise.all(list.projects.map((p) => api.get(`/api/projects/${p.id}/tasks`).then((r) => (r.tasks || r).map((t) => ({ ...t, project: p.name })))));
+  const all = per.flat();
+  const want = ["TESTING", "REVIEWING", "CORRECTING", "COMPLETED"];
+  const rows = all.filter((t) => want.includes(t.status));
+  return rows.length
+    ? h("table", null, h("thead", null, h("tr", null, ["Task", "Project", "Status", "Next step"].map((t) => h("th", null, t)))),
+      h("tbody", null, rows.map((t) => h("tr", null, h("td", null, link(`#/task/${t.id}`, `#${t.id} ${t.title}`)), h("td", null, t.project), h("td", null, statusPill(t.status)),
+        h("td", { class: "muted" }, { TESTING: "gate runs, or press it", REVIEWING: "independent review running", CORRECTING: "a worker is fixing the findings", COMPLETED: "publish a pull request" }[t.status])))))
+    : empty("Nothing waits for review.");
+}
+
+async function githubCard() {
+  const [st, gc] = await Promise.all([api.get("/api/credentials/github"), api.get("/api/gate/config")]);
+  const token = h("input", { id: "gh-token", type: "password", autocomplete: "off", size: 50, placeholder: st.configured ? "saved — type to replace" : "github_pat_…" });
+  const mc = h("input", { id: "gate-max", type: "number", min: "0", max: "5", value: gc.max_corrections });
+  const auto = h("input", { id: "gate-auto", type: "checkbox", checked: gc.auto });
+  return h("div", { class: "card" }, h("h2", null, "GitHub token and gate"),
+    h("p", { class: "muted" }, `Token: ${st.configured ? "saved in the Windows credential store" : "not saved"}. Use a fine-grained token limited to the project repositories (contents: write, pull requests: write). It is never shown again.`),
+    field("GitHub token", token),
+    h("p", { class: "row" },
+      h("button", { class: "primary", onclick: () => act(async () => { await api.put("/api/credentials/github", { token: token.value }); token.value = ""; }, () => route("#/git")) }, "Save token"),
+      h("button", { class: "danger", onclick: () => confirm("Remove the saved GitHub token?") && act(() => api.del("/api/credentials/github"), () => route("#/git")) }, "Remove token")),
+    h("div", { class: "row" }, field("Corrections per task", mc), h("label", null, auto, " run the gate by itself (needs the scheduler)")),
+    h("p", null, h("button", { onclick: () => act(() => api.put("/api/gate/config", { max_corrections: Number(mc.value), auto: auto.checked }), () => route("#/git")) }, "Save gate settings")));
+}
+
 async function gitView() {
   const my = navToken;
-  const list = await api.get("/api/projects");
+  const [queue, card, list] = await Promise.all([reviewQueue(), githubCard(), api.get("/api/projects")]);
   const details = await Promise.all(list.projects.map((p) => api.get(`/api/projects/${p.id}`)));
   show(my, h("h1", null, "Git & review"),
-    details.length ? details.map((p) => h("div", { class: "card" }, h("strong", null, link(`#/project/${p.id}/sources`, p.name)), h("div", { class: "muted" }, `integration: ${p.integration_mode}`), h("div", { class: "muted" }, p.git && p.git.is_repo ? JSON.stringify({ branch: p.git.branch, dirty_files: p.git.dirty_count }) : "not a git repository")) ) : empty("No project yet."),
-    h("div", { class: "note" }, "Diff review, the acceptance gate and pull-request creation arrive with the test/review work package. Workers never push to main; their results will appear here as branches for you to review."));
+    h("p", { class: "muted" }, "Worker results wait here as branches. The acceptance gate checks scope, tests, merge safety and an independent review; you publish a pull request. Workers never push to main and CPM never merges."),
+    h("h2", null, "Waiting for review"), queue,
+    h("h2", null, "Projects"),
+    details.length ? details.map((p) => h("div", { class: "card" }, h("strong", null, link(`#/project/${p.id}/sources`, p.name)), h("div", { class: "muted" }, `integration: ${p.integration_mode}`), h("div", { class: "muted" }, p.git && p.git.is_repo ? JSON.stringify({ branch: p.git.branch, dirty_files: p.git.dirty_count }) : "not a git repository"))) : empty("No project yet."),
+    card);
 }
 
 async function settingsView() {

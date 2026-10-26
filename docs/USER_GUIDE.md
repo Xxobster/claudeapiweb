@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.10.0)
+# USER_GUIDE (v0.13.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -86,9 +86,18 @@ CPM starts READY tasks by itself when it is run with `CPM_SCHEDULER=1` (`scripts
 - Scheduler screen (v0.11.1, menu "Scheduler"): pause/resume, "Run one pass", the global / per-project / heavy limits, the workers running now, the queue in start order with the reason each task waits ("waiting: ...", "blocked by: ...", "deferred: ..." and the backoff time left after a refused start), the failed tasks with what automatic retry will do, and the form for the limits. The button for automatic retry of API tasks is off by default; turning it on asks for confirmation because every retry spends from the budget. The page refreshes every 3 s.
 - Starting a task by hand (`POST /api/tasks/{id}/runs`) skips the reservation check: prefer letting the scheduler do it.
 
+## Review, acceptance gate and pull requests (v0.13.0)
+When a worker finishes, its task waits in **TESTING**. The **acceptance gate** then checks, in this order: the task has acceptance criteria; the worker changed something; no file is outside the declared scope or protected (`.git`, `.claude`, `.mcp.json`, symlinks, submodules, files over 5 MB); the project's tests pass (only in a trusted project; the first command found, or `test_commands` in the project profile); the result still merges onto the base branch; an independent reviewer marks every criterion met. Only then the task becomes **COMPLETED**.
+- If tests fail, a file is unexpected or the reviewer rejects, the findings go back to a worker (**CORRECTING**) for up to 2 corrections (Git & review page, "Corrections per task"). The same failure twice in a row, or the limit, ends the task as FAILED.
+- The gate **waits** (task stays TESTING, the reason is shown) when: no acceptance criteria (edit the task, then run the gate again), the project is not trusted but has tests, the branch conflicts with the base (rebase it in your own tree; CPM never rebases), or no automatic reviewer exists. API-billed tasks have no automatic reviewer yet: read the diff on the task page, then press "Approve after my review".
+- Task page, section **Review**: the changed files (with "expected" or the reason a file is unexpected), the diff per file or whole, every gate result with tests, review and findings, and the **Publish** box. Viewing never changes the task's files.
+- **Publish** (COMPLETED tasks): save a fine-grained GitHub token first (Git & review page; needs contents and pull requests write on the project repository). The button commits exactly what the gate checked, pushes the `claude/...` branch (never main, never forced) and opens a pull request that lists files changed, tests, security findings, exploit findings and what still needs the PC (the text you type). CPM never merges: merge it on GitHub. A failed attempt can be retried; nothing is pushed twice.
+- API: `GET /api/tasks/{id}/review|changes|diff`, `POST /api/tasks/{id}/gate|gate/approve|integrate`, `GET/PUT /api/gate/config`, `PUT/DELETE /api/credentials/github`. The gate runs by itself on every unpaused scheduler pass (turn off with `auto` in the gate settings).
+
 ## Restart and backups (v0.12.0)
 - When CPM starts it first copies the database to `data\backups\` (the newest 10 are kept), then checks for work that was interrupted by a stop or crash. Interrupted tasks are marked **FAILED** (or **PAUSED** if they were in the middle of a commit: check the task's worktree, then resume or retry yourself). Locks and budget holds of those tasks are freed. Nothing is started or completed by this check.
 - What was found is at `GET /api/recovery` (last report and backup list); `POST /api/recovery/reconcile` repeats the check and `POST /api/recovery/backup` makes a backup now.
+- Tasks that were being reviewed go back to TESTING (the gate asks again); a task that was waiting for its correction worker is PAUSED.
 - Worktrees left behind are listed in the report with "has work ... kept" or "clean". CPM never deletes them by itself.
 - Restore a backup: stop CPM, then `python -m cpm.recovery list` and `python -m cpm.recovery restore data\backups\<file>`. The database you replaced is kept next to it as `cpm.db.before-restore-<time>`.
 
