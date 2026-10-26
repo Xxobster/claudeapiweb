@@ -24,9 +24,9 @@ from pathlib import Path
 from typing import IO, Any
 
 from sqlalchemy import Engine, func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from cpm.budget.ledger import BudgetDenied, BudgetLedger, Reservation
 from cpm.config import Settings
 from cpm.db.models import Event, Project, Run, Task, UsageEvent, utcnow
 from cpm.db.settings_repo import get_setting
@@ -60,7 +60,7 @@ RUN_ENDED = (
     "BUDGET_STOPPED",
     "KILLED",
 )
-_STARTABLE = ("READY", "RESERVED", "PAUSED")
+_STARTABLE = ("READY", "RESERVED", "PAUSED", "PAUSED_BUDGET")
 # intent -> (run status, task status, reason)
 _OUTCOMES = {
     "cancel": ("CANCELLED", "CANCELLED", "cancelled by user"),
@@ -88,6 +88,16 @@ class LiveRunNotAllowed(RunError):
 
 class NotRunning(RunError):
     status = 404
+
+
+class BudgetRefused(RunError):
+    """Budget admission said no (WP8). `.detail` names the ceiling and what is left."""
+
+    status = 409
+
+    def __init__(self, message: str, detail: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 @dataclass
@@ -127,6 +137,7 @@ class _Live:
     result: dict[str, Any] | None = None
     session_id: str | None = None
     exited: bool = False
+    billing_mode: str = "mock"
 
 
 def _snapshot(s: Session, r: Run) -> RunInfo:
@@ -177,8 +188,10 @@ class RunSupervisor:
         secrets: SecretStore,
         *,
         python: str | None = None,
+        ledger: BudgetLedger | None = None,
     ) -> None:
         self.engine = engine
+        self.ledger = ledger or BudgetLedger(engine)
         self.settings = settings
         self.secrets = secrets
         self.python = python or sys.executable
@@ -216,7 +229,7 @@ class RunSupervisor:
             return next((r for r, lv in self._live.items() if lv.task_id == task_id), None)
 
     # ----------------------------------------------------------------------- start
-    def _live_gates(self, task_id: int, max_budget_microusd: int | None) -> tuple[str, int]:
+    def _live_gates(self, max_budget_microusd: int | None) -> tuple[str, int]:
         """All conditions for an API-billed run. Returns (api key, per-run cap in micro-USD)."""
         if not self.settings.allow_live_runs:
             raise LiveRunNotAllowed("live runs are off (start CPM with CPM_ALLOW_LIVE_RUNS=1)")
@@ -237,22 +250,6 @@ class RunSupervisor:
         if max_budget_microusd > min(ceilings):
             raise RunRefused(
                 f"per-run budget {max_budget_microusd} exceeds the allowed ceiling {min(ceilings)}"
-            )
-        # Retries and resumes must not multiply the cap: all runs of a task share one ceiling.
-        with Session(self.engine) as s:
-            spent = int(
-                s.scalar(
-                    select(func.coalesce(func.sum(UsageEvent.cost_microusd), 0)).where(
-                        UsageEvent.task_id == task_id
-                    )
-                )
-                or 0
-            )
-        remaining = min(ceilings) - spent
-        if max_budget_microusd > remaining:
-            raise RunRefused(
-                f"task budget left is {max(remaining, 0)} micro-USD ({spent} already spent "
-                f"of {min(ceilings)}); lower the per-run budget or raise the task budget"
             )
         return key, max_budget_microusd
 
@@ -299,6 +296,27 @@ class RunSupervisor:
             t = s.get(Task, task_id)
             return t.status if t else None
 
+    def _admit(
+        self, billing: str, task_id: int, project_id: int, cap: int | None
+    ) -> Reservation | None:
+        """Hold the run's budget before anything is created (WP8, THREATS T-13).
+
+        API runs always need it. A mock run is admitted only when the caller gave it an explicit
+        cap and a monthly budget exists, which is how the budget behaviour is tested without
+        spending anything.
+        """
+        if billing == "mock" and (not cap or not self.ledger.configured()):
+            return None
+        if not cap:
+            raise RunRefused("an API-billed run needs an explicit per-run budget")
+        try:
+            # Retries and resumes must not multiply the cap: all runs of an API task share one
+            # ceiling, the configured task budget or else the live-run maximum (WP5 audit).
+            default = self.settings.live_run_max_microusd if billing == "api" else None
+            return self.ledger.admit(task_id, project_id, cap, task_cap_default=default)
+        except BudgetDenied as exc:
+            raise BudgetRefused(str(exc), exc.detail) from exc
+
     def _max_parallel(self) -> int:
         cfg = get_setting(self.engine, "wizard.config") or {}
         return int(cfg.get("max_parallel_agents", 3))
@@ -327,7 +345,7 @@ class RunSupervisor:
                 .order_by(Run.id.desc())
                 .limit(1)
             )
-            resumed = task.status == "PAUSED" and prev_session is not None
+            resumed = task.status in ("PAUSED", "PAUSED_BUDGET") and prev_session is not None
             attempt = (
                 s.scalar(select(func.max(Run.attempt)).where(Run.task_id == task_id)) or 0
             ) + 1
@@ -335,11 +353,12 @@ class RunSupervisor:
             billing, model, effort = task.billing_mode, task.model, task.effort
             title, project_path, slug = task.title, Path(project.path), project.slug
             trusted, prior_status = bool(project.workspace_trusted), task.status
+            project_id_ = project.id
 
         key: str | None = None
         cap: int | None = max_budget_microusd
         if billing == "api":
-            key, cap = self._live_gates(task_id, max_budget_microusd)
+            key, cap = self._live_gates(max_budget_microusd)
             register_secret(key)  # exact-match redaction of the key everywhere, logs included
             if scenario != "success" or scenario_args:
                 raise RunRefused("scenarios exist only for mock tasks")
@@ -353,129 +372,142 @@ class RunSupervisor:
         else:
             raise RunRefused("CLI/subscription mode is an interface stub in v1 (DECISIONS Q9)")
 
-        data = self.tasks.get(task_id)
         try:  # the stored path is re-checked at use time (moved, replaced by a junction, revoked)
             project_path = resolve_in_any(
                 get_setting(self.engine, "approved_roots", []) or [], project_path
             )
         except PathPolicyError as exc:
             raise RunRefused(f"project path is not inside an approved root: {exc}") from exc
+        reservation = self._admit(billing, task_id, project_id_, cap)
         try:
-            wt = self.worktrees.ensure(project_path, slug, task_id, title)
-        except WorktreeError as exc:
-            raise RunRefused(f"worktree: {exc}") from exc
+            data = self.tasks.get(task_id)
+            try:
+                wt = self.worktrees.ensure(project_path, slug, task_id, title)
+            except WorktreeError as exc:
+                raise RunRefused(f"worktree: {exc}") from exc
 
-        policy = worker_policy(trusted)
-        spec = RunSpec(
-            run_id=0,
-            task_id=task_id,
-            provider="sdk" if billing == "api" else "mock",
-            prompt=build_prompt(data, branch=wt.branch, resumed=resumed),
-            worktree=str(wt.path),
-            model=model,
-            effort=effort,
-            scenario=scenario,
-            scenario_args=scenario_args,
-            scope=data.declared_scope,
-            trusted=trusted,
-            setting_sources=list(policy.setting_sources),
-            max_budget_usd=float(Decimal(cap) / _MICRO) if cap else None,
-            resume_session_id=prev_session if resumed else None,
-            heartbeat_s=heartbeat_s,
-        )
-
-        extra = {"PYTHONIOENCODING": "utf-8"}
-        if not trusted:
-            extra |= self._untrusted_git_env(wt.path)
-        env = build_child_env("api", key, extra=extra) if key else build_mock_env(extra=extra)
-
-        # Task moves first: an illegal state (e.g. a concurrent cancel) stops the launch here.
-        try:
-            if prior_status == "READY":
-                self.tasks.transition(task_id, "RESERVED", actor=ACTOR)
-            self.tasks.transition(task_id, "RUNNING", actor=ACTOR, reason="worker starting")
-        except IllegalTransition as exc:
-            raise RunError(str(exc)) from exc
-
-        with Session(self.engine) as s:
-            run = Run(
+            policy = worker_policy(trusted)
+            spec = RunSpec(
+                run_id=0,
                 task_id=task_id,
+                provider="sdk" if billing == "api" else "mock",
+                prompt=build_prompt(data, branch=wt.branch, resumed=resumed),
+                worktree=str(wt.path),
+                model=model,
+                effort=effort,
+                scenario=scenario,
+                scenario_args=scenario_args,
+                scope=data.declared_scope,
+                trusted=trusted,
+                setting_sources=list(policy.setting_sources),
+                max_budget_usd=float(Decimal(cap) / _MICRO) if cap else None,
+                resume_session_id=prev_session if resumed else None,
+                heartbeat_s=heartbeat_s,
+            )
+
+            extra = {"PYTHONIOENCODING": "utf-8"}
+            if not trusted:
+                extra |= self._untrusted_git_env(wt.path)
+            env = build_child_env("api", key, extra=extra) if key else build_mock_env(extra=extra)
+
+            # Task moves first: an illegal state (e.g. a concurrent cancel) stops the launch here.
+            try:
+                if prior_status == "READY":
+                    self.tasks.transition(task_id, "RESERVED", actor=ACTOR)
+                self.tasks.transition(task_id, "RUNNING", actor=ACTOR, reason="worker starting")
+            except IllegalTransition as exc:
+                raise RunError(str(exc)) from exc
+
+            with Session(self.engine) as s:
+                run = Run(
+                    task_id=task_id,
+                    attempt=attempt,
+                    billing_mode=billing,
+                    model=model,
+                    status="STARTING",
+                    worktree_path=str(wt.path),
+                    started_at=utcnow(),
+                    heartbeat_at=utcnow(),
+                )
+                s.add(run)
+                s.commit()
+                run_id = run.id
+            if reservation is not None:
+                self.ledger.attach_run(reservation.id, run_id)
+            project_id = data.project_id
+            spec.run_id = run_id
+            run_dir = self.settings.runs_dir / str(run_id)
+            run_dir.mkdir(parents=True, exist_ok=True)
+            spec_path = run_dir / "spec.json"
+            spec_path.write_text(json.dumps(spec.to_json()), encoding="utf-8")
+            runlog = RunLog(run_dir / "events.jsonl")
+            runlog.append(
+                "run_created",
+                run_id=run_id,
                 attempt=attempt,
                 billing_mode=billing,
+                provider=spec.provider,
                 model=model,
-                status="STARTING",
-                worktree_path=str(wt.path),
-                started_at=utcnow(),
-                heartbeat_at=utcnow(),
+                resumed=resumed,
+                branch=wt.branch,
             )
-            s.add(run)
-            s.commit()
-            run_id = run.id
-        project_id = data.project_id
-        spec.run_id = run_id
-        run_dir = self.settings.runs_dir / str(run_id)
-        run_dir.mkdir(parents=True, exist_ok=True)
-        spec_path = run_dir / "spec.json"
-        spec_path.write_text(json.dumps(spec.to_json()), encoding="utf-8")
-        runlog = RunLog(run_dir / "events.jsonl")
-        runlog.append(
-            "run_created",
-            run_id=run_id,
-            attempt=attempt,
-            billing_mode=billing,
-            provider=spec.provider,
-            model=model,
-            resumed=resumed,
-            branch=wt.branch,
-        )
 
-        if self._task_status(task_id) != "RUNNING":  # cancelled while we were preparing
-            self._finish_rows(run_id, task_id, "CANCELLED", None, "task changed before launch")
-            raise RunError("the task was stopped before the worker started")
-        argv = [self.python, "-I", "-m", "cpm.workers.run", "--spec", str(spec_path)]
-        try:
-            tree = proctree.spawn(argv, env, run_dir)
-        except OSError as exc:
-            self._finish_rows(run_id, task_id, "CRASHED", None, f"could not start worker: {exc}")
-            self._fail_task(task_id, "could not start worker")
-            raise RunError("could not start the worker process") from exc
-
-        live = _Live(
-            run_id,
-            task_id,
-            project_id,
-            tree,
-            runlog,
-            cap,
-            hang_timeout_s,
-            max_runtime_s,
-            resumed,
-            last_event=time.monotonic(),
-            started=time.monotonic(),
-        )
-        with self._lock:
-            self._live[run_id] = live
-        if (now := self._task_status(task_id)) != "RUNNING":  # cancel/pause raced with the spawn
-            live.intent = "pause" if now == "PAUSED" else "cancel"  # a pause stays resumable
-            tree.kill()
-        with Session(self.engine) as s:
-            r = s.get(Run, run_id)
-            assert r is not None  # noqa: S101
-            r.pid, r.status = tree.pid, "RUNNING"
-            s.add(
-                Event(
-                    project_id=project_id,
-                    task_id=task_id,
-                    run_id=run_id,
-                    kind="run.started",
-                    detail=json.dumps({"attempt": attempt, "billing_mode": billing}),
+            if self._task_status(task_id) != "RUNNING":  # cancelled while we were preparing
+                self._finish_rows(run_id, task_id, "CANCELLED", None, "task changed before launch")
+                raise RunError("the task was stopped before the worker started")
+            argv = [self.python, "-I", "-m", "cpm.workers.run", "--spec", str(spec_path)]
+            try:
+                tree = proctree.spawn(argv, env, run_dir)
+            except OSError as exc:
+                self._finish_rows(
+                    run_id, task_id, "CRASHED", None, f"could not start worker: {exc}"
                 )
+                self._fail_task(task_id, "could not start worker")
+                raise RunError("could not start the worker process") from exc
+
+            live = _Live(
+                run_id,
+                task_id,
+                project_id,
+                tree,
+                runlog,
+                cap,
+                hang_timeout_s,
+                max_runtime_s,
+                resumed,
+                last_event=time.monotonic(),
+                started=time.monotonic(),
             )
-            s.commit()
-        t = threading.Thread(target=self._monitor, args=(live,), name=f"run-{run_id}", daemon=True)
-        self._threads[run_id] = t
-        t.start()
-        return self.get_run(run_id)
+            live.billing_mode = billing
+            with self._lock:
+                self._live[run_id] = live
+            if (now := self._task_status(task_id)) != "RUNNING":  # cancel/pause raced the spawn
+                live.intent = "pause" if now == "PAUSED" else "cancel"  # a pause stays resumable
+                tree.kill()
+            with Session(self.engine) as s:
+                r = s.get(Run, run_id)
+                assert r is not None  # noqa: S101
+                r.pid, r.status = tree.pid, "RUNNING"
+                s.add(
+                    Event(
+                        project_id=project_id,
+                        task_id=task_id,
+                        run_id=run_id,
+                        kind="run.started",
+                        detail=json.dumps({"attempt": attempt, "billing_mode": billing}),
+                    )
+                )
+                s.commit()
+            t = threading.Thread(
+                target=self._monitor, args=(live,), name=f"run-{run_id}", daemon=True
+            )
+            self._threads[run_id] = t
+            t.start()
+            return self.get_run(run_id)
+        except BaseException:
+            if reservation is not None:
+                self.ledger.release(reservation.id)
+            raise
 
     def _untrusted_git_env(self, worktree: Path) -> dict[str, str]:
         """Neutralise repo-defined programs git could run for an untrusted workspace (T-05)."""
@@ -618,30 +650,36 @@ class RunSupervisor:
                 s.commit()
 
     def _record_usage(self, live: _Live, f: dict[str, Any]) -> None:
-        mid, cost = f.get("message_id"), f.get("cost_microusd")
-        if not isinstance(mid, str) or not isinstance(cost, int) or cost < 0 or not mid:
+        mid = f.get("message_id")
+        if not isinstance(mid, str) or not mid:
             live.log.append("warning", text="malformed usage event ignored")
             return
-        row = UsageEvent(
-            run_id=live.run_id,
-            task_id=live.task_id,
-            project_id=live.project_id,
-            dedup_key=f"msg:{mid}"[:128],
-            model=str(f.get("model") or "unknown")[:64],
-            input_tokens=int(f.get("input_tokens") or 0),
-            output_tokens=int(f.get("output_tokens") or 0),
-            cache_read_tokens=int(f.get("cache_read_tokens") or 0),
-            cache_write_tokens=int(f.get("cache_write_tokens") or 0),
-            cost_microusd=cost,
-            reconciled=False,
-        )
-        try:
-            with Session(self.engine) as s:
-                s.add(row)
-                s.commit()
-        except IntegrityError:
+        explicit = f.get("cost_microusd")
+        keys = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
+        tokens = [f.get(k) for k in keys]
+        if not all(isinstance(t, int) and t >= 0 for t in tokens if t is not None):
+            live.log.append("warning", text="malformed usage event ignored")
+            return
+        i, o, cr, cw = (int(t or 0) for t in tokens)
+        # A live worker never decides what it cost: API runs are always priced from the table.
+        # Only scripted mock runs may state a cost.
+        if live.billing_mode == "mock" and isinstance(explicit, int) and explicit >= 0:
+            cost: int | None = explicit
+        else:
+            cost = None
+        counted = self.ledger.record_usage(
+            run_id=live.run_id, task_id=live.task_id, project_id=live.project_id,
+            message_id=mid, model=str(f.get("model") or "unknown"),
+            input_tokens=i, output_tokens=o, cache_read=cr, cache_write=cw, cost_microusd=cost,
+        )  # fmt: skip
+        if counted is None:
             return  # same message id seen twice: counted once (SDK_NOTES SDK-4)
-        live.cost_microusd += cost
+        live.cost_microusd += counted
+        for a in self.ledger.check_thresholds(live.project_id, live.task_id):
+            live.log.append(
+                "budget_alert", scope=a.scope, level=a.level, spent_microusd=a.spent_microusd,
+                cap_microusd=a.cap_microusd, checkpoint_requested=a.checkpoint_requested,
+            )  # fmt: skip
         if live.cap_microusd is not None and live.cost_microusd >= live.cap_microusd:
             if live.intent is None:
                 live.intent = "budget"
@@ -672,6 +710,8 @@ class RunSupervisor:
         if res and not ok and live.intent is None and run_status == "FAILED":
             reason = str(res.get("text") or reason)[:300]
         self._reconcile_total(live, res)
+        if live.intent == "budget":
+            self.ledger.record_exhaustion(live.project_id, live.task_id, live.run_id, reason)
         live.log.append("run_ended", status=run_status, exit_code=code, task_status=task_status)
         self._finish_rows(live.run_id, live.task_id, run_status, code, reason, live.session_id)
         try:
@@ -689,24 +729,10 @@ class RunSupervisor:
         if live.resumed or not isinstance(total, int | float):
             return
         delta = int(Decimal(str(total)) * _MICRO) - live.cost_microusd
-        if delta <= 0:
-            return
-        try:
-            with Session(self.engine) as s:
-                s.add(
-                    UsageEvent(
-                        run_id=live.run_id,
-                        task_id=live.task_id,
-                        project_id=live.project_id,
-                        dedup_key=f"result:{live.run_id}",
-                        model="reconcile",
-                        cost_microusd=delta,
-                    )
-                )
-                s.commit()
+        if delta > 0 and self.ledger.add_adjustment_row(
+            live.run_id, live.task_id, live.project_id, delta
+        ):
             live.cost_microusd += delta
-        except IntegrityError:
-            pass
 
     def _finish_rows(
         self,
@@ -725,6 +751,8 @@ class RunSupervisor:
             if session_id:
                 r.session_id = session_id
             r.result_json = json.dumps({"reason": redact(reason)})
+            s.commit()
+            self.ledger.release_run(run_id)  # the hold ends with the run, whatever the outcome
             t = s.get(Task, task_id)
             s.add(
                 Event(

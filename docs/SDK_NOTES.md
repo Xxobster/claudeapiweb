@@ -44,6 +44,7 @@ Confirmed fields: `tools`, `allowed_tools`, `disallowed_tools`, `can_use_tool`, 
 | Haiku 4.5 (legacy) | `claude-haiku-4-5-20251001` | 1 | 1.25 | 2 | 0.10 | 5 | n/a |
 - Batch = 50% off. All four current models: 1M context, 128K max output, knowledge cutoff June 2026. All support effort low..max.
 - Opus 5.5 returns HTTP 400 if thinking is disabled; Sonnet 5.5 does not accept `disabled`. NOT VERIFIED: whether a long-context surcharge applies beyond Haiku 5.5.
+- Re-checked 2026-10-26 against the Claude API model/pricing table (claude-api skill, cached 2026-10-06): input/output prices unchanged. One correction: **Sonnet 5.5 cache read is 0.20** (0.1x of 2.00), not 0.10 as first written; WP8 seeds 0.20 (the dearer, never under-counting). Opus 5.5 cache read is 0.20 in both sources although 0.1x input would be 0.40: NOT VERIFIED, kept as published. The Haiku 5.5 long-prompt tier applies above 100K prompt tokens (input + cache read + cache write). CPM uses the 5-minute cache-write rate only.
 - Micah's global rule: Sonnet 5.5 default, Opus 5.5 only for the listed cases (user CLAUDE.md). Haiku 5.5 is the cheap default for planner/reviewer drafts if quality is proven. These prices seed the versioned DB price table (WP8); Micah can edit it; prices must be re-checked at every release.
 
 ## 6. Usage/Cost Admin API (SDK-6)

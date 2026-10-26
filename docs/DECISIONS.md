@@ -57,7 +57,7 @@
 - Stop semantics: cancel/hang/timeout/budget/shutdown kill the tree immediately; pause writes `stop` on the child's stdin and kills after 3 s. Pause + resume = a new run (attempt n+1) that resumes the previous SDK session in the same worktree.
 - A successful worker moves the task to TESTING, never COMPLETED (acceptance gate = WP10). Failure, crash, hang and timeout -> FAILED (retry via READY keeps the worktree); budget stop -> PAUSED_BUDGET (resuming from it belongs to WP8).
 - Live (API) runs need `CPM_ALLOW_LIVE_RUNS=1`, wizard cap, key in the store, and an explicit per-run budget not above `min(CPM_LIVE_RUN_MAX_MICROUSD = 2 USD, wizard task budget)`. Nothing here calls the API without those; no live run was made in WP5.
-- Cost estimate per message uses the SDK_NOTES section 5 prices (`workers/estimate.py`, integers, never under-counts unknown models); WP8 replaces it with the DB price table. Usage rows dedup on the message id; a final reported total above the sum adds a reconciling row, except for resumed sessions (their total includes earlier runs).
+- Cost estimate per message uses the SDK_NOTES section 5 prices (integers, never under-counts unknown models); since v0.8.0 (WP8) it comes from the DB price table (`budget/pricing.py`). Usage rows dedup on the message id; a final reported total above the sum adds a reconciling row, except for resumed sessions (their total includes earlier runs).
 - Workers get no auto-approved tools: every file and Bash call goes through `workers/permissions.py`. Bash = one simple allowlisted command (git read/add/commit, `ls`, `pwd`, and in a trusted workspace `python -m pytest|ruff|mypy`). Lanes (WP12) will add their own allowlists.
 - Worktree base is `origin/main` when it exists, otherwise HEAD. Content filters (LFS) are blanked for checkout, so LFS files appear as pointers until WP12 decides the binary policy.
 - WebSocket progress is a 0.2 s tail of the JSONL file, so reconnecting with `since=<seq>` replays exactly.
@@ -80,3 +80,10 @@
 - Untrusted projects: every project/task screen says that workers do not load the project's CLAUDE.md, hooks, MCP or skills until the workspace is trusted, and that trusting lets repo scripts run on the PC.
 - Not faked: costs show only recorded ledger rows (estimated vs reconciled). Budget admission, reservations and review/diff screens are explicit "arrives with ..." notes until WP6-WP8/WP10 add their APIs (second UI PR then).
 - Browser tests: `tests/ui/e2e.mjs` (Node + Playwright, mock runs only) is run by hand, not in CI.
+
+## 2026-10-26 - WP8 assumptions (made by the build thread under Micah's autonomy; tell the thread to change any)
+- The wizard's monthly "global" cap is the monthly allocation; the project cap is **per month** per project; the task cap is for the **whole life** of the task (so retries and resumes share it).
+- Prices: seeded from SDK_NOTES section 5, re-checked 2026-10-26; Sonnet 5.5 cache read corrected to 0.20 USD/MTok. Micah can append versions through `PUT /api/budget/prices/{model}`.
+- Mock runs are free and unaffected unless a test passes an explicit cap (then they are admitted like real runs).
+- Not in WP8: daily budget level, cost-center screen (WP15), automatic Console reconciliation (needs an Admin key, SDK_NOTES section 6), the 90 % checkpoint message to a worker (WP10).
+

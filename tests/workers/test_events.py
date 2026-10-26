@@ -1,4 +1,3 @@
-from cpm.workers.estimate import estimate_microusd
 from cpm.workers.events import MAX_FIELD_CHARS, RunLog
 
 
@@ -24,13 +23,3 @@ def test_log_is_size_capped(tmp_path):
         log.append("text", text=f"line {i} " + "y" * 40)
     ev = log.read(limit=1000)
     assert ev[-1]["type"] == "log_full" and log.path.stat().st_size < 1000
-
-
-def test_estimate_is_integer_and_never_undercounts_unknown_models():
-    # 1000 in + 500 out on Sonnet 5.5: 1000*2 + 500*10 = 7000 micro-USD
-    assert estimate_microusd("claude-sonnet-5-5", 1000, 500) == 7000
-    assert estimate_microusd("claude-haiku-5-5", 10, 0) == 1
-    assert estimate_microusd("future-model", 1000, 0) == estimate_microusd(
-        "claude-fable-5-1", 1000, 0
-    )
-    assert isinstance(estimate_microusd("claude-opus-5-5", 3, 3, 3, 3), int)

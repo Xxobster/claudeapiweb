@@ -100,9 +100,9 @@ def test_options_and_event_mapping(tmp_path, fake_sdk):
     assert [x["session_id"] for x in sessions] == ["sess-1"]  # published once, before the result
     assert [t for t, _ in events].index("session") < [t for t, _ in events].index("result")
     usage = [f for t, f in events if t == "usage"]
-    assert (
-        len(usage) == 1 and usage[0]["message_id"] == "msg_1" and usage[0]["cost_microusd"] == 7000
-    )
+    assert len(usage) == 1 and usage[0]["message_id"] == "msg_1"
+    assert "cost_microusd" not in usage[0]  # the supervisor prices tokens from the table
+    assert (usage[0]["input_tokens"], usage[0]["output_tokens"]) == (1000, 500)
     result = next(f for t, f in events if t == "result")
     assert result["ok"] is True and result["total_cost_usd"] == 0.02
 

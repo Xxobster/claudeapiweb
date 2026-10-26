@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from cpm.db.models import Project
-from cpm.workers.supervisor import RunError, RunInfo, RunSupervisor
+from cpm.workers.supervisor import BudgetRefused, RunError, RunInfo, RunSupervisor
 from cpm.workers.worktree import WorktreeError, WorktreeHasChanges
 
 router = APIRouter(prefix="/api", tags=["runs"])
@@ -44,6 +44,8 @@ class StartIn(BaseModel):
 def _call(fn: Any, *a: Any, **kw: Any) -> Any:
     try:
         return fn(*a, **kw)
+    except BudgetRefused as e:
+        raise HTTPException(e.status, {"error": str(e), **e.detail}) from e
     except RunError as e:
         raise HTTPException(e.status, str(e)) from e
     except WorktreeHasChanges as e:

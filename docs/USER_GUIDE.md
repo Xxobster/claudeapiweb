@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.5.1)
+# USER_GUIDE (v0.9.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -64,6 +64,17 @@ Start CPM with `scripts\start.ps1`: it opens `http://127.0.0.1:8765/` already si
 - Open two tabs on two projects at once; each follows its own runs.
 - Check the UI yourself: `node tests/ui/e2e.mjs` (Node + Playwright installed; uses mock runs only).
 - After pulling this version re-run `scripts\setup.ps1` (new dependency `websockets`).
+
+## Budget and cost center (v0.9.0, API only; the screen comes with the UI work package)
+CPM keeps one ledger of every message's cost and refuses to start a run that would not fit. Every number is an **estimate** (token counts times the price table) until you reconcile it with the Console.
+- Where you see it: `GET /api/budget` (month, per project, held money, level 0/70/90/100, credit balance), `GET /api/tasks/{id}/budget`, `GET /api/budget/reservations` (money held by running workers).
+- Caps: the wizard sets task, project and monthly caps. Task = whole life of the task; project and month reset each UTC month. Without a monthly cap no billable run starts.
+- Starting a run holds its per-run budget; if the month, project, task or credit balance cannot cover it you get HTTP 409 saying which ceiling, how much is left and what you asked for. The hold is given back when the run ends, however it ends.
+- 70 % of a cap: information; 90 %: alert (the run log marks `checkpoint_requested`); 100 %: the worker is stopped, the worktree is kept, the task becomes **PAUSED_BUDGET** and nothing more is spent without you.
+- Your five choices for a PAUSED_BUDGET task: `POST /api/tasks/{id}/budget-action` with `add_budget` (amount_usd, raises this task's cap), `resume_no_increase` (checks the headroom after you fixed an accounting error), `reassign_model` (cheaper model), `defer` (wait for next month), `cancel` (keeps the work). Then resume with `POST /api/tasks/{id}/resume`; the earlier spend still counts.
+- Other tools: `POST /api/budget/top-up {scope: month|project|task, ref, amount_usd}`, `PUT /api/budget/credit-balance {balance_usd}` (Anthropic does not expose your credit; CPM shows entered balance minus spend since), `POST /api/budget/reconcile {actual_usd, period?}` (type the Console figure; the month then shows "reconciled"), `GET/PUT /api/budget/prices` (appends a new price version; check the prices at each release).
+- Limits: no daily cap yet, no automatic Console reconciliation, SDK `max_budget_usd` is only a backstop. Auto-reload of credits is never used.
+- After pulling this version restart CPM: the database migrates to revision 0004 by itself.
 
 ## What exists in v0.1.0 (skeleton)
 Only the skeleton: `/health`, database with all core tables, migrations, redacted logging. No API key is needed or read. The UI, security middleware and key wizard come in later work packages (PLAN.md WP2+).

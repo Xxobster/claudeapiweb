@@ -52,8 +52,8 @@ NOT verified: Edge/Firefox, the Windows browser, a real API-billed run from the 
 | ID | Sev | Threat | Mitigation | Owner/test |
 |---|---|---|---|---|
 | T-12 | H | Silent switch from subscription to API billing (or the reverse) because `ANTHROPIC_API_KEY` is in the inherited environment | Child env built explicitly; billing mode stored per run and shown in UI; `check_env.ps1` reports key presence; startup warns if a key is set in the user env | WP2, WP5 |
-| T-13 | H | Concurrent workers overspend a shared cap | Admission reserves estimated cost in a `BEGIN IMMEDIATE` transaction; reconcile with actual usage; per-run `max_budget_usd` only as backstop; no live run without a configured cap | WP8 property test |
-| T-14 | M | Wrong prices or model IDs | Price table in DB, versioned, sourced from SDK_NOTES with date; UI labels "estimate" vs "reconciled" | WP8 |
+| T-13 | H | Concurrent workers overspend a shared cap | Admission reserves estimated cost in a `BEGIN IMMEDIATE` transaction; reconcile with actual usage; per-run `max_budget_usd` only as backstop; no live run without a configured cap | WP8 property test (done v0.8.0: `tests/budget/test_ledger.py`, fails if `BEGIN IMMEDIATE` is removed) |
+| T-14 | M | Wrong prices or model IDs | Price table in DB, versioned, sourced from SDK_NOTES with date; UI labels "estimate" vs "reconciled" | WP8 (done v0.8.0: `prices` table + `price_version` on every ledger row) |
 | T-15 | M | Duplicate usage events inflate/deflate ledger | Dedup key = SDK message id | WP8 |
 | T-16 | M | Float rounding in money | `Decimal` in code, integer micro-dollars in DB | WP8 |
 | T-17 | L | Auto top-up of credits | Never enabled (CLAUDE.md rule 7) | docs |
@@ -70,6 +70,11 @@ NOT verified: Edge/Firefox, the Windows browser, a real API-billed run from the 
 | T-24 | M | Case/slash/`..`/short-name aliasing makes two reservations look disjoint | Normalize before compare; `.meta` pairing | WP6 |
 | T-25 | M | Agent claims success without evidence | Deterministic acceptance gate; no auto-complete | WP10 |
 | T-26 | L | Windows path with spaces or non-ASCII (OneDrive `20 - PROJECTS`) | Structured args; tests with such paths | all |
+
+## WP8 notes (2026-10-26, v0.8.0)
+Checked: API key exposure (no endpoint reads or writes the key; budget routes handle money only), SQL (bound parameters, fixed table names), numeric abuse (amounts are `Decimal` with digit limits, positive, top-up at most 10,000 USD, prices at most 1,000 USD per million tokens, negative token counts refused), model id in the price route (regex, no path or traversal characters), a worker lying about cost (API runs are priced by CPM from the table, the child's `cost_microusd` is ignored; mock-only exception), money endpoints behind token + Host/Origin + CSRF like every route (tested 401 without token), concurrency (threaded admission test; mutation check: without `BEGIN IMMEDIATE` the test fails in 5 of 5 seeds), events carry amounts only.
+Findings made while building (fixed with tests): (1) the app builds the supervisor before migrations run, so the price table loads lazily; (2) an audit event stored a Python repr instead of JSON and broke `GET /api/tasks/{id}` (the test caught it); (3) a hold plus the same run's spend would have been counted twice (exposure uses `max(0, hold - run spend)`).
+Accepted / open: T-40 a single message can overshoot a run's hold by its own cost (soft limit by design; the kill happens after the usage event, as in WP5); T-41 holds of a crashed CPM stay until WP9 calls `release_orphans`; T-42 estimates can under-count if Anthropic changes prices or the price table is stale (re-check `prices` at every release, `verified_on` is shown); T-43 month boundaries use UTC; a run that spans midnight is counted in the month of each message; T-44 the manual credit balance and Console figure are typed by the user and trusted.
 
 ## WP4 notes (2026-10-26, v0.3.0)
 Checked: task scope paths (syntactic validation, WP6 re-normalizes), secrets in prompts/events (refused/redacted), SQL injection (ORM bound parameters), 422 responses echo no input, every route behind the guard, no subprocess in `tasks/`, TODO/planner text stored as inert data (T-05 stays open until WP5 quotes it in worker prompts), concurrent transitions (compare-and-set). Residual: task titles/descriptions are stored as typed (a secret typed by the user into a title stays in the DB; events are redacted); graph lock is per process.

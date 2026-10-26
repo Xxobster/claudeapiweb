@@ -13,7 +13,7 @@ from cpm.security.childenv import build_mock_env
 from cpm.workers import proctree
 from cpm.workers.events import RunLog
 from cpm.workers.permissions import ToolContext, decide
-from cpm.workers.supervisor import MAX_LINE, RunError, RunRefused, _lines
+from cpm.workers.supervisor import MAX_LINE, BudgetRefused, RunError, RunRefused, _lines
 
 
 def _live_ready(env):
@@ -36,8 +36,9 @@ def test_task_budget_is_shared_by_all_runs_of_a_task(env):
                        model="m", cost_microusd=1_500_000)
         )  # fmt: skip
         s.commit()
-    with pytest.raises(RunRefused, match="task budget left is 500000"):
+    with pytest.raises(BudgetRefused) as e:  # the WP8 ledger now enforces this shared ceiling
         env.sup.start(t.id, max_budget_microusd=1_000_000)
+    assert e.value.detail["scope"] == "task" and e.value.detail["remaining_microusd"] == 500_000
     assert env.tasks.get(t.id).status == "READY"
 
 
