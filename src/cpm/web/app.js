@@ -273,19 +273,28 @@ function streamRun(runId, logBox, stateEl, refreshTask) {
     logBox.scrollTop = logBox.scrollHeight;
   };
   const set = (t, cls) => { stateEl.textContent = t; stateEl.className = `pill ${cls || ""}`; };
+  let timer = null;
+  const retryLater = () => {
+    if (closed || timer) return;  // one retry per dead socket (error and close both report it)
+    set("reconnecting…", "warn");
+    timer = setTimeout(() => { timer = null; open(); }, Math.min(1000 * 2 ** retry++, 10000));
+  };
   const open = async () => {
+    if (closed) return;
     try {
-      ws = await api.openStream(runId, last, (ev) => {
+      const sock = await api.openStream(runId, last, (ev) => {
         if (ev.type === "end") { set("run finished", "ok"); closed = true; if (refreshTask) route(); return; }
         if (typeof ev.seq === "number") last = ev.seq;
         line(ev);
       }, (st) => {
         if (st === "live") { set("streaming", "ok"); retry = 0; }
-        else if (!closed) { set("reconnecting…", "warn"); setTimeout(open, Math.min(1000 * 2 ** retry++, 10000)); }
+        else if (!closed) retryLater();
       });
-    } catch (e) { set(e.message || "stream failed", "bad"); }
+      if (closed) { sock.close(); return; }  // the view was left while the ticket was requested
+      ws = sock;
+    } catch (e) { if (!closed) { set(e.message || "stream failed", "bad"); retryLater(); } }
   };
-  onLeave(() => { closed = true; if (ws) ws.close(); });
+  onLeave(() => { closed = true; clearTimeout(timer); if (ws) ws.close(); });
   open();
 }
 
