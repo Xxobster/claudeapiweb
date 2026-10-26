@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.9.0)
+# USER_GUIDE (v0.10.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -48,7 +48,8 @@ A run is one worker process for one task. It works in its own git worktree under
 - Untrusted projects: the worker may edit files in its worktree and read the project, but cannot run tests or linters (they execute repository code); trust the project first to allow `python -m pytest|ruff|mypy`. Workers can never push, fetch, use the network, or touch `.git`, `.claude` or `.mcp.json`.
 - Limits: `max_parallel_agents` from the wizard (default 3, hard maximum 8) counts running workers. Settings: `CPM_WORKTREE_ROOT` (default: `cpm-worktrees` next to the CPM folder, never inside OneDrive or inside the managed project).
 
-## Reservations, Desktop claims and locks (v0.8.0)
+## Reservations, Desktop claims and locks (v0.8.0; screen in v0.10.0)
+On the **Agents** page, each project shows what its tasks have reserved, your Desktop claims (add a path and a note, release with one click; if a running task already holds the path you get a warning to pause it), the state of the project's own locks and a button that scans the main folder for edits made behind CPM's back. A task page says why the task cannot start and offers "Release this task's reservations" for a stuck one (refused while a worker runs). The API calls behind it:
 - Before a worker starts, its task reserves what it will touch: its declared scope (files or folders; a folder blocks everything below it) and, for heavy lanes, `unity_editor`, `gpu`, `blender` or a device. Two tasks that overlap cannot run together; the second stays READY and shows why, for example: `blocked by: task #4 holds path src/ (needed src/a.py)` or `blocked by: Desktop claim on Assets/Game/UI/`. See it with `GET /api/tasks/{id}/conflicts`.
 - **Tell CPM what Claude Desktop is editing**: `POST /api/projects/{id}/desktop-claims` with `{"path": "Assets/Game/UI/", "note": "menu rework", "expires_in_s": 7200}`; release with `DELETE /api/desktop-claims/{claim}`. A claim blocks CPM tasks that want to write there (reading is fine) and never stops a worker already running: the answer lists the tasks that already hold the path so you can pause them.
 - **Heavy work waits**: while `BUILD_RUNNING.lock`, `BLENDER_RUNNING.lock` or a file in the gpu-lock folder exists, no heavy task starts; light tasks continue. At most one heavy task runs at a time. `GET /api/projects/{id}/locks` shows the state of these locks, the job board claims and the device locks (read-only).
@@ -60,12 +61,13 @@ Start CPM with `scripts\start.ps1`: it opens `http://127.0.0.1:8765/` already si
 - **Projects**: add a folder (read-only registration). Each project has a Board (one column per status, refreshes by itself), a Table, "Sources & trust" and "Add tasks" (new task or TODO checklist import).
 - **Trust**: until you trust a project, its workers do not load its CLAUDE.md, hooks, MCP servers or skills. Trust it only after looking at the repository, because its scripts then run on this PC.
 - **Task page**: move it between states, start a run (mock tasks pick a scenario; API tasks need a per-run budget), pause/resume/cancel, and follow the worker's log live. A finished worker leaves the task in TESTING.
-- **Agents**: workers running now across projects. **Costs**: caps from setup and recorded spend (estimate vs reconciled). **Git & review**: branch state per project; diffs and PRs arrive later.
+- **Agents**: workers running now, the budget they hold, and per project the reservations, your Desktop claims and the project's own locks (see below). **Costs**: see "Budget and cost center". **Git & review**: branch state per project; diffs and PRs arrive later.
 - Open two tabs on two projects at once; each follows its own runs.
 - Check the UI yourself: `node tests/ui/e2e.mjs` (Node + Playwright installed; uses mock runs only).
 - After pulling this version re-run `scripts\setup.ps1` (new dependency `websockets`).
 
-## Budget and cost center (v0.9.0, API only; the screen comes with the UI work package)
+## Budget and cost center (v0.9.0; screen in v0.10.0)
+On the **Costs** page: the month's meter (spent, held by running workers, cap, 70 / 90 / 100 % marks and what each level does), a form to add to this month's cap, per-project spend and room left, the price table, your credit balance and the reconcile form. A task that ran out of budget shows the five choices at the top of its task page (and is listed on Costs); "Add budget" asks you to confirm the amount, then press "Resume" on the task page to run it again. The monthly cap itself is set in **Settings**. The API calls behind it:
 CPM keeps one ledger of every message's cost and refuses to start a run that would not fit. Every number is an **estimate** (token counts times the price table) until you reconcile it with the Console.
 - Where you see it: `GET /api/budget` (month, per project, held money, level 0/70/90/100, credit balance), `GET /api/tasks/{id}/budget`, `GET /api/budget/reservations` (money held by running workers).
 - Caps: the wizard sets task, project and monthly caps. Task = whole life of the task; project and month reset each UTC month. Without a monthly cap no billable run starts.
