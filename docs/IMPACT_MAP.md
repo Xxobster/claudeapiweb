@@ -71,7 +71,13 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 - Loop: `CPM_SCHEDULER=1` starts `run_forever` in the app lifespan (default off, so tests and `python -m cpm.main` stay inert; `scripts/start.ps1` turns it on). `POST /api/scheduler/tick` runs the same pass once. `pause` stops dispatch only (housekeeping continues); it is persisted in `settings`.
 - Hooks for later packages: `resources_for(task)` (WP12 lanes return `ResourceRequest`s such as `gpu`/`unity_editor`, which makes the task heavy), `start_args_for(task)` (scenario for mock runs, lane limits). WP10 owns reservations from TESTING on: the scheduler releases them when a task leaves RESERVED/RUNNING; the gate must `Admission.reserve`-style re-acquire if it needs paths during review.
 - No schema change (no migration; v0.11.0 follows 0004; 0005 stays free).
-- Known gaps: `POST /api/tasks/{id}/runs` (manual start) still bypasses reservations, by design a person's explicit action (R-WP7-1); cooldowns are in memory and reset on restart; no UI yet for scheduler status (`GET /api/scheduler` only); the voice "restart when GPU free" rule (rule 49) comes with WP13 as a `resources_for` + lowest priority.
+- Known gaps: `POST /api/tasks/{id}/runs` (manual start) still bypasses reservations, by design a person's explicit action (R-WP7-1); cooldowns are in memory and reset on restart; the voice "restart when GPU free" rule (rule 49) comes with WP13 as a `resources_for` + lowest priority.
+
+### WP15c notes (scheduler screen, v0.11.1)
+- New read-only `GET /api/scheduler/queue` (`Scheduler.queue()`): READY tasks in `policy.order_key` order with `reason` (the last pass's skip reason, else the last `scheduler.deferred` / `reservation.blocked` event), `backoff_s` and `refused_starts` from the in-memory cooldown, running workers, and FAILED tasks with the `retry_decision` preview. It never starts, reserves or transitions anything. A change to `SchedulerConfig`, `_cooldown`, the skip-reason strings or `retry_decision` shapes breaks `schedulerView` in `app.js` (check `tests/ui/e2e.mjs` step 6e and `tests/scheduler/test_scheduler.py::test_queue_view_*`).
+- UI: `schedulerView` (nav "Scheduler"), polls every 3 s. Config saves send the whole config (the API replaces it; `heavy_limit` is not sent, it is fixed at 1). Turning on automatic retry for API tasks asks for a browser confirmation (rule 7); it adds `api` to `retry_billing_modes` and is off by default.
+- Found by the e2e run: `set_setting` raced on the first write of a key (two requests, UNIQUE on `settings.key`); it is now one `INSERT .. ON CONFLICT DO UPDATE`. Buttons inside a form need `type: "button"` or they also submit it.
+- Security: no new write path, same token/CSRF guard; all text rendered with `textContent` (no `innerHTML`); the queue shows reasons already redacted when stored. No migration.
 
 ## 3. Open risks (see THREATS.md for the full list)
 High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Micah's decision). Process: subscription use of the SDK unverified (CLI mode stays a stub); Admin cost API availability unknown.
@@ -115,7 +121,7 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 ## 2e. WP15 notes (web UI)
 - The UI is a static, build-less SPA served by FastAPI (`/` + `/ui/*`, public but Host/Origin-checked). It calls only `/api/*` with `X-CPM-Token`; mutations add `X-CPM-CSRF` from `/api/session`. Live logs: `POST /api/ws-ticket {run_id}` then `ws://.../api/runs/{id}/stream?ticket=...&since=n`.
 - Consequence: any new API field shown in the UI must be added to `app.js`; any new endpoint stays token-protected by default (only `/health`, `/`, `/ui/*` are public: `security/middleware.py` `PUBLIC_PATHS`/`UI_PREFIX`).
-- Dashboard data is `GET /api/dashboard` (task counts per project, live workers, spend split estimated/reconciled). WP6-WP8 (reservations, scheduler, budget admission) should add their own endpoints; Costs and Agents are wired (v0.10.0, see below). The Git page still carries its "arrives with ..." note (WP10); the scheduler screen is not built (WP7). Hook points left: `gitView()` (diff/review, WP10).
+- Dashboard data is `GET /api/dashboard` (task counts per project, live workers, spend split estimated/reconciled). WP6-WP8 (reservations, scheduler, budget admission) should add their own endpoints; Costs and Agents are wired (v0.10.0, see below). The Git page still carries its "arrives with ..." note (WP10). Hook points left: `gitView()` (diff/review, WP10).
 - The UI must never use `innerHTML`, inline script/style or a remote asset (CSP + test). Browser tabs share the token via localStorage.
 - `websockets` is now a runtime dependency (uvicorn's WebSocket support); the lock was regenerated.
 
@@ -125,11 +131,12 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 - No backend change, no migration. The monthly cap stays in the wizard form (Settings); the Costs page only adds to it (top-up), so there is one place that sets the base cap.
 - The CSP forbids `style` attributes: dynamic widths are set through CSSOM (`el.style.x`), never `h(..., {style})`. Found by the e2e console check.
 - Every spend-raising button (`Add to cap`, `Add budget`) asks for a browser confirmation: the click is the explicit authorisation (rule 7).
-- Open: the scheduler screen waits for WP7; the live 90 % checkpoint message is still WP10; the 3 s refresh of Agents pauses while a form field has focus.
+- Open: the live 90 % checkpoint message is still WP10; the 3 s refresh of Agents pauses while a form field has focus.
 
 ## 4. Change log
 | Date | Version | Change | By |
 |---|---|---|---|
+| 2026-10-26 | 0.11.1 | WP15c: Scheduler screen (queue order, limits, backoff and refusal reasons, failed-task retry preview, API auto-retry toggle), read-only `GET /api/scheduler/queue`, race-free `set_setting`; no migration (touches `scheduler/core`, `api/scheduler`, `db/settings_repo`, `web/*`) | CPM Code thread (WP15c) |
 | 2026-10-26 | 0.11.0 | WP7: scheduler (`cpm.scheduler`): deterministic tick (heartbeat/release/stale-reserved demotion, external scan, dependency promotion, bounded auto-retry with identical-failure detection, dispatch by priority with heavy-short-first, global/per-project/heavy limits), deferral with backoff for refused starts, `/api/scheduler/*`, `CPM_SCHEDULER` loop in the app lifespan; no migration (touches `api/app`, `config`, `scripts/start.ps1`) | CPM Code thread (WP7) |
 | 2026-10-26 | 0.10.0 | WP15b: Costs page (month meter with 70/90/100 marks, top-up, per-project, prices, credit balance, reconcile), PAUSED_BUDGET choices and per-task budget on the task page, Agents page with budget holds, reservations, Desktop claims, external locks and outside-edit scan, "blocked by" box with manual release; UI + e2e + docs only, no migration | CPM Code thread (WP15b) |
 | 2026-10-26 | 0.9.0 | WP8: versioned price table (replaces `workers/estimate.py`), usage ledger with price version, atomic budget admission (`BEGIN IMMEDIATE`, month/project/task/credit ceilings), reservations released on every run end, 70/90/100 % threshold events, PAUSED_BUDGET resume + five options, manual credit balance and reconciliation, `/api/budget*` and `/api/tasks/{id}/budget(-action)`; migration 0004 (touches `db/models`, `workers/{supervisor,providers}`, `api/{app,runs}`; removes `workers/estimate.py`) | CPM Code thread (WP8) |

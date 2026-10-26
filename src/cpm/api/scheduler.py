@@ -40,6 +40,12 @@ def status(request: Request) -> dict[str, Any]:
     return out
 
 
+@router.get("/queue")
+def queue(request: Request) -> dict[str, Any]:
+    """READY queue in dispatch order with the reason each task waits (read-only)."""
+    return _sched(request).queue()
+
+
 @router.post("/pause")
 def pause(request: Request) -> dict[str, Any]:
     """Stop starting new work. Running workers are untouched (cancel/pause them per task)."""

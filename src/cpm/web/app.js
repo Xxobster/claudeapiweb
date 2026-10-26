@@ -164,6 +164,75 @@ async function agentsView() {
   onLeave(() => clearInterval(t));
 }
 
+async function schedulerView() {
+  const my = navToken;
+  const draw = async () => {
+    const [st, q] = await Promise.all([api.get("/api/scheduler"), api.get("/api/scheduler/queue")]);
+    const cfg = st.config;
+    const lim = st.limits;
+    const running = q.running.length;
+    const head = h("div", { class: "card" },
+      h("div", { class: "row" },
+        h("span", { class: `pill ${st.paused ? "warn" : "ok"}` }, st.paused ? "paused: nothing new starts" : "running"),
+        !st.enabled ? h("span", { class: "pill warn" }, "background loop is off (CPM_SCHEDULER): use Run one pass") : null,
+        st.paused
+          ? h("button", { class: "primary", onclick: () => act(() => api.post("/api/scheduler/resume"), draw) }, "Resume")
+          : h("button", { onclick: () => act(() => api.post("/api/scheduler/pause"), draw) }, "Pause"),
+        h("button", { onclick: () => act(async () => { const r = await api.post("/api/scheduler/tick"); setBanner(`Pass done: ${r.started.length} started, ${Object.keys(r.skipped).length} waiting, ${r.retried.length} retried, ${r.gave_up.length} given up${r.errors.length ? `; errors: ${r.errors.join("; ")}` : ""}`, "info"); }, draw) }, "Run one pass")),
+      h("p", { class: "muted" }, "Pausing only stops new starts; running workers are untouched (cancel or pause them from their task). A pass does exactly what the loop does, so it cannot skip locks or budget checks."),
+      st.last_tick ? h("p", { class: "muted" }, `Last pass ${when(st.last_tick.at)}`, st.last_tick.errors.length ? h("span", { class: "warn" }, ` · ${st.last_tick.errors.join("; ")}`) : null) : h("p", { class: "muted" }, "No pass yet since the server started."));
+    const limits = h("div", { class: "grid" },
+      h("div", { class: "card" }, h("h3", null, "Workers at once"), h("strong", null, `${running} / ${lim.global}`), h("div", { class: "muted" }, "global limit (Settings → parallel agents)")),
+      h("div", { class: "card" }, h("h3", null, "Per project"), h("strong", null, lim.per_project ? String(lim.per_project) : "no extra limit"), h("div", { class: "muted" }, "workers one project may run")),
+      h("div", { class: "card" }, h("h3", null, "Heavy jobs"), h("strong", null, `${q.ready.filter((r) => r.heavy).length} waiting · max ${lim.heavy} at once`), h("div", { class: "muted" }, "Unity, Blender, GPU; fixed at 1")));
+    const runningTbl = running ? h("table", null, h("thead", null, h("tr", null, ["Task", "Project", "Mode"].map((t) => h("th", null, t)))),
+      h("tbody", null, q.running.map((r) => h("tr", null, h("td", null, link(`#/task/${r.task_id}`, `#${r.task_id} ${r.title}`)), h("td", null, r.project), h("td", null, r.billing_mode))))) : h("p", { class: "muted" }, "No worker is running.");
+    const queueTbl = q.ready.length ? h("table", null, h("thead", null, h("tr", null, ["#", "Task", "Project", "Priority", "Mode", "Estimate", "Why it waits"].map((t) => h("th", null, t)))),
+      h("tbody", null, q.ready.map((r) => h("tr", null,
+        h("td", null, String(r.position)),
+        h("td", null, link(`#/task/${r.task_id}`, `#${r.task_id} ${r.title}`), r.heavy ? h("span", { class: "pill warn" }, "heavy") : null),
+        h("td", null, r.project), h("td", null, String(r.priority)), h("td", null, r.billing_mode),
+        h("td", null, r.estimate_microusd ? usd(r.estimate_microusd) : "—"),
+        h("td", null,
+          r.backoff_s > 0 ? h("span", { class: "pill warn" }, `backing off ${Math.ceil(r.backoff_s)} s (${r.refused_starts} refused start${r.refused_starts === 1 ? "" : "s"})`) : null,
+          r.reason ? h("span", { class: r.reason.startsWith("waiting") ? "muted" : "warn" }, ` ${r.reason}`) : (r.backoff_s > 0 ? null : h("span", { class: "muted" }, "next in line, no refusal recorded"))))))) : empty("The queue is empty: no task is READY.");
+    const retryTbl = q.failed.length ? h("table", null, h("thead", null, h("tr", null, ["Failed task", "Mode", "Retries", "Automatic retry", "Because"].map((t) => h("th", null, t)))),
+      h("tbody", null, q.failed.map((r) => h("tr", null, h("td", null, link(`#/task/${r.task_id}`, `#${r.task_id} ${r.title}`)), h("td", null, r.billing_mode), h("td", null, String(r.retry_count)),
+        h("td", null, h("span", { class: `pill ${r.action === "give_up" ? "bad" : r.action === "wait" ? "warn" : "ok"}` }, { retry: "will retry", wait: "waiting", give_up: "gave up" }[r.action] || r.action)), h("td", null, r.why))))) : h("p", { class: "muted" }, "No failed task.");
+    const apiRetry = cfg.retry_billing_modes.includes("api");
+    const num = (id, v, attrs) => h("input", { id, type: "number", value: v, step: "any", ...attrs });
+    const ppl = num("sc-ppl", cfg.per_project_limit ?? "", { min: 1, max: 8, placeholder: "none" });
+    const mr = num("sc-mr", cfg.max_auto_retries, { min: 0, max: 5 });
+    const il = num("sc-il", cfg.identical_failure_limit, { min: 1, max: 5 });
+    const rd = num("sc-rd", cfg.retry_delay_s, { min: 0, max: 3600 });
+    const save = (modes) => act(() => api.put("/api/scheduler/config", {
+      per_project_limit: ppl.value === "" ? null : Number(ppl.value), max_auto_retries: Number(mr.value),
+      identical_failure_limit: Number(il.value), retry_delay_s: Number(rd.value),
+      hang_timeout_s: cfg.hang_timeout_s, max_runtime_s: cfg.max_runtime_s, external_scan_s: cfg.external_scan_s,
+      retry_billing_modes: modes,
+    }), draw);
+    const toggle = h("button", { type: "button", class: apiRetry ? "danger" : "", onclick: () => {
+      const next = apiRetry ? cfg.retry_billing_modes.filter((m) => m !== "api") : [...cfg.retry_billing_modes, "api"];
+      if (!apiRetry && !confirm("Allow the scheduler to re-run a failed API task by itself? Each retry spends money from the budget (still capped by the task, project and month limits).")) return;
+      save(next);
+    } }, apiRetry ? "Turn off automatic retry for API tasks" : "Turn on automatic retry for API tasks");
+    const form = h("form", { class: "card", onsubmit: (e) => { e.preventDefault(); save(cfg.retry_billing_modes); } },
+      h("div", { class: "row" }, field("Workers per project (empty = none)", ppl), field("Automatic retries per task", mr), field("Stop after N identical failures", il), field("Wait before a retry (s)", rd)),
+      h("p", null, h("button", { class: "primary", type: "submit" }, "Save limits")),
+      h("p", null, h("strong", null, "Automatic retry of API tasks: "), h("span", { class: `pill ${apiRetry ? "warn" : "ok"}` }, apiRetry ? "on" : "off"), " ", toggle),
+      h("p", { class: "muted" }, apiRetry ? "A failed API task is re-run up to the retry limit, each run charged to the budget." : "Off by default: a failed API task stays FAILED until you retry it, so nothing is spent without your click.", ` Retry applies to: ${cfg.retry_billing_modes.join(", ") || "nothing"}.`));
+    show(my, h("h1", null, "Scheduler"), head, limits,
+      h("h2", null, "Running now"), runningTbl,
+      h("h2", null, "Queue (order of start)"),
+      h("p", { class: "muted" }, "Sorted by priority (lower number first); among heavy tasks the cheaper estimate goes first; ties by task number."), queueTbl,
+      h("h2", null, "Failed tasks and automatic retry"), retryTbl,
+      h("h2", null, "Limits and retry"), form);
+  };
+  await draw();
+  const t = setInterval(() => { if (!document.activeElement || !document.activeElement.closest("form")) draw().catch(() => {}); }, 3000);
+  onLeave(() => clearInterval(t));
+}
+
 async function projectsView() {
   const my = navToken;
   const [list, profiles] = await Promise.all([api.get("/api/projects"), api.get("/api/profiles")]);
@@ -497,6 +566,7 @@ async function route(to) {
     else if (a === "project" && b) await projectView(b, c || "board");
     else if (a === "task" && b) await taskView(b);
     else if (a === "agents") await agentsView();
+    else if (a === "scheduler") await schedulerView();
     else if (a === "costs") await costsView();
     else if (a === "git") await gitView();
     else if (a === "settings") await settingsView();

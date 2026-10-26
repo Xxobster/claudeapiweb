@@ -5,7 +5,8 @@ from cpm.config import ConfigError, load_settings
 
 def test_scheduler_routes_need_the_token(client):
     for method, path in (
-        ("get", "/api/scheduler"), ("post", "/api/scheduler/pause"),
+        ("get", "/api/scheduler"), ("get", "/api/scheduler/queue"),
+        ("post", "/api/scheduler/pause"),
         ("post", "/api/scheduler/tick"), ("put", "/api/scheduler/config"),
     ):  # fmt: skip
         assert getattr(client, method)(path).status_code == 401
@@ -90,3 +91,8 @@ def test_loop_starts_with_the_app_when_enabled(settings):
                 break
             time.sleep(0.1)
         assert c.app.state.scheduler._last is not None
+
+
+def test_queue_endpoint_is_read_only_and_empty_by_default(client, auth):
+    out = client.get("/api/scheduler/queue", headers=auth).json()
+    assert out == {"ready": [], "running": [], "failed": []}
