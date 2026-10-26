@@ -87,3 +87,9 @@
 - Mock runs are free and unaffected unless a test passes an explicit cap (then they are admitted like real runs).
 - Not in WP8: daily budget level, cost-center screen (WP15), automatic Console reconciliation (needs an Admin key, SDK_NOTES section 6), the 90 % checkpoint message to a worker (WP10).
 
+
+## 2026-10-26 (WP7) — implementation choices (awaiting Micah only if he disagrees)
+- The scheduler loop is opt-in by environment (`CPM_SCHEDULER=1`, set by `start.ps1`) so nothing starts workers by surprise in tests or ad-hoc runs. It still never spends: API tasks go through the unchanged live gates and the budget ledger, and a refusal only defers the task.
+- Automatic retries default to mock tasks only; API tasks are retried by the scheduler only if Micah turns it on (`retry_billing_modes`), because a retry spends again. Defaults: 2 automatic retries, 30 s delay, stop after 2 identical failures.
+- Heavy order: among heavy tasks of equal priority the smaller estimate goes first (Nirandyr rule 27). `heavy_limit` is fixed at 1 (Q8).
+- Paused/budget-paused tasks and hand-blocked tasks are never started or promoted by the scheduler.

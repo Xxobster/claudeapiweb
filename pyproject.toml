@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-project-manager"
-version = "0.10.0"
+version = "0.11.0"
 description = "Claude Project Manager (CPM): local-first manager for parallel Claude API workers"
 requires-python = ">=3.12"
 dependencies = [

@@ -29,6 +29,8 @@ class Settings:
     allow_live_key_test: bool = False
     allow_live_runs: bool = False
     live_run_max_microusd: int = 2_000_000
+    scheduler_enabled: bool = False
+    scheduler_interval_s: float = 2.0
     worktree_root: Path = _REPO_ROOT.parent / "cpm-worktrees"
 
     @property
@@ -88,6 +90,12 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         live_max = int(e.get("CPM_LIVE_RUN_MAX_MICROUSD", 2_000_000))
     except ValueError as exc:
         raise ConfigError("CPM_LIVE_RUN_MAX_MICROUSD must be an integer") from exc
+    try:
+        interval = float(e.get("CPM_SCHEDULER_INTERVAL_S", 2.0))
+    except ValueError as exc:
+        raise ConfigError("CPM_SCHEDULER_INTERVAL_S must be a number") from exc
+    if not 0.2 <= interval <= 600:
+        raise ConfigError("CPM_SCHEDULER_INTERVAL_S must be between 0.2 and 600")
     if live_max < 0:
         raise ConfigError("CPM_LIVE_RUN_MAX_MICROUSD cannot be negative")
     return Settings(
@@ -98,6 +106,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         allow_live_key_test=e.get("CPM_ALLOW_LIVE_KEY_TEST") == "1",
         allow_live_runs=e.get("CPM_ALLOW_LIVE_RUNS") == "1",
         live_run_max_microusd=live_max,
+        scheduler_enabled=e.get("CPM_SCHEDULER") == "1",
+        scheduler_interval_s=interval,
         worktree_root=_check_worktree_root(
             Path(e.get("CPM_WORKTREE_ROOT", str(_REPO_ROOT.parent / "cpm-worktrees")))
         ),
