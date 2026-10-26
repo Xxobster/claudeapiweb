@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import sqlite3
 
 import pytest
@@ -69,3 +70,39 @@ def test_wal_file_created(tmp_path):
     db = tmp_path / "w.db"
     upgrade(f"sqlite:///{db.as_posix()}")
     assert sqlite3.connect(db).execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_upgrade_0002_keeps_referencing_rows(tmp_path):
+    """Table rebuild during migration must not cascade-delete deps, runs, usage or events."""
+    db = tmp_path / "pop.db"
+    url = f"sqlite:///{db.as_posix()}"
+    upgrade(url, "0001")
+    engine = make_engine(db)
+    with engine.begin() as c:
+        raw = c.connection.dbapi_connection
+        raw.executescript(
+            """
+            INSERT INTO projects (id, slug, name, path, integration_mode, workspace_trusted, created_at)
+                VALUES (1, 'p', 'P', '/x', 'pr_only', 0, '2026-01-01');
+            INSERT INTO tasks (id, project_id, title, description, status, priority, billing_mode,
+                declared_scope, acceptance, estimate_microusd, created_at, updated_at)
+                VALUES (1, 1, 'a', '', 'DRAFT', 100, 'api', '[]', '[]', 0, '2026-01-01', '2026-01-01'),
+                       (2, 1, 'b', '', 'READY', 100, 'api', '[]', '[]', 0, '2026-01-01', '2026-01-01');
+            INSERT INTO task_deps (task_id, depends_on_id) VALUES (2, 1);
+            INSERT INTO runs (id, task_id, attempt, billing_mode, status) VALUES (1, 1, 1, 'api', 'DONE');
+            INSERT INTO events (id, ts, project_id, task_id, run_id, kind, detail)
+                VALUES (1, '2026-01-01', 1, 1, 1, 'x', '{}');
+            INSERT INTO usage_events (id, ts, run_id, task_id, project_id, dedup_key, model,
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_microusd, reconciled)
+                VALUES (1, '2026-01-01', 1, 1, 1, 'k', 'm', 1, 1, 0, 0, 5, 0);
+            """
+        )
+    upgrade(url)
+    with engine.connect() as c:
+        q = lambda sql: c.exec_driver_sql(sql).scalar()  # noqa: E731
+        assert q("SELECT count(*) FROM task_deps") == 1
+        assert q("SELECT count(*) FROM runs") == 1
+        assert q("SELECT count(*) FROM usage_events") == 1
+        assert q("SELECT task_id FROM events") == 1
+        assert q("SELECT status FROM tasks WHERE id=1") == "BACKLOG"
+        assert q("PRAGMA foreign_keys") == 1

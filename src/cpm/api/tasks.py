@@ -182,8 +182,12 @@ def get_task(request: Request, task_id: int) -> dict[str, Any]:
 @router.patch("/tasks/{task_id}")
 def edit_task(request: Request, task_id: int, body: TaskPatch) -> dict[str, Any]:
     changes = body.model_dump(exclude_unset=True)
-    if any(changes.get(k, 0) is None for k in ("title", "priority", "billing_mode", "description")):
-        raise HTTPException(422, "title, description, priority and billing_mode cannot be null")
+    not_null = (
+        "title", "description", "priority", "billing_mode",
+        "declared_scope", "acceptance", "estimate_microusd",
+    )  # fmt: skip
+    if any(k in changes and changes[k] is None for k in not_null):
+        raise HTTPException(422, f"{', '.join(not_null)} cannot be null")
     return _out(_call(_svc(request).edit, task_id, actor=ACTOR, **changes))
 
 

@@ -47,6 +47,7 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 - TODO text and planner output are untrusted data (T-05): they become titles/descriptions only. WP5 must quote them as data in worker prompts.
 - Prompt store refuses bodies matching the secret redaction patterns.
 - Migration `0002` adds `parent_id`, `retry_count`, `source`, `source_ref` (unique per project: import dedup), `started_at`, `completed_at`; initial status is BACKLOG (was DRAFT). Backup/restore (WP9) must include them.
+- `migrations/env.py` now runs migrations with `PRAGMA foreign_keys=OFF`, then `foreign_key_check`, then ON (SQLite batch rebuilds would otherwise cascade-delete referencing rows). Any future migration inherits this; test populated upgrades like `test_upgrade_0002_keeps_referencing_rows`.
 - A new endpoint on the task API needs a test in `tests/security/test_tasks_security.py` (auth + CSRF).
 
 ## 3. Open risks (see THREATS.md for the full list)

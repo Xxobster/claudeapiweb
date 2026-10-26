@@ -72,9 +72,26 @@ def parse_todo(text: str) -> list[TodoItem]:
     return items
 
 
-def _ref(source: str, item: TodoItem) -> str:
-    norm = " ".join(item.text.lower().split())
-    return hashlib.sha256(f"{source}\n{item.heading}\n{norm}".encode()).hexdigest()[:32]
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _refs(source: str, items: list[TodoItem]) -> list[str]:
+    """Stable per-item references: heading + ancestor chain + text, plus an occurrence counter
+    so identical siblings stay distinct while re-imports give the same references."""
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for it in items:
+        chain: list[str] = []
+        p = it.parent
+        while p is not None:
+            chain.append(_norm(items[p].text))
+            p = items[p].parent
+        key = "\n".join([source, it.heading, *reversed(chain), _norm(it.text)])
+        n = seen.get(key, 0)
+        seen[key] = n + 1
+        out.append(hashlib.sha256(f"{key}\n#{n}".encode()).hexdigest()[:32])
+    return out
 
 
 @dataclass
@@ -94,6 +111,7 @@ def import_todo(
     from cpm.db.models import Task
 
     items = parse_todo(text)
+    refs = _refs(source_name, items)
     with Session(svc.engine) as s:
         existing = {
             r: i
@@ -110,7 +128,7 @@ def import_todo(
         if it.done:
             done += 1
             continue
-        ref = _ref(source_name, it)
+        ref = refs[idx]
         if ref in existing:
             ids[idx] = existing[ref]
             dup += 1

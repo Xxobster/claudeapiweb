@@ -121,3 +121,27 @@ def test_prompts_api(client, auth):
     assert client.get("/api/prompts/p", headers=auth).json()["body"] == "hello2"
     assert client.get("/api/prompts/p?version=1", headers=auth).json()["body"] == "hello"
     assert [p["name"] for p in client.get("/api/prompts", headers=auth).json()] == ["p"]
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "title",
+        "description",
+        "priority",
+        "billing_mode",
+        "declared_scope",
+        "acceptance",
+        "estimate_microusd",
+    ],
+)
+def test_patch_null_on_non_nullable_is_422(client, auth, project_id, field):
+    a = client.post(url(project_id), json={"title": "a"}, headers=auth).json()
+    r = client.patch(f"/api/tasks/{a['id']}", json={field: None}, headers=auth)
+    assert r.status_code == 422
+    assert (
+        client.patch(
+            f"/api/tasks/{a['id']}", json={"role": None, "model": None}, headers=auth
+        ).status_code
+        == 200
+    )

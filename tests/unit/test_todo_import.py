@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import pytest
 
 from cpm.tasks.planner import MockPlanner, PlannerUnavailable, get_planner
@@ -98,3 +99,13 @@ def test_prompt_versions(svc):
 def test_prompt_rejects_secrets_and_bad_input(svc, name, body):
     with pytest.raises(InvalidTask):
         PromptStore(svc.engine).save(name, body)
+
+
+def test_same_child_under_different_parents_is_kept(svc):
+    text = "- [ ] Backend\n  - [ ] Add tests\n- [ ] Frontend\n  - [ ] Add tests\n- [ ] Add tests\n- [ ] Add tests\n"
+    r = import_todo(svc, svc.pid, text, "TODO.md", actor="u")
+    assert len(r.created) == 6
+    kids = [t for t in r.created if t.parent_id]
+    assert {t.parent_id for t in kids} == {r.created[0].id, r.created[2].id}
+    again = import_todo(svc, svc.pid, text, "TODO.md", actor="u")
+    assert again.created == [] and again.skipped_existing == 6
