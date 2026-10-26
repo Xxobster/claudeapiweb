@@ -104,8 +104,44 @@ try {
     .catch(async () => { throw new Error("board: " + (await a.textContent("main")).slice(0, 600)); });
 
   // 6. Costs and git pages render real (empty) data.
-  await a.goto(`${base}/#/costs`); await a.waitForSelector("text=Recorded spend per project");
+  await a.goto(`${base}/#/costs`); await a.waitForSelector("text=Recorded spend (all time");
   await a.goto(`${base}/#/git`); await a.waitForSelector("text=never push to main");
+
+  // 6b. Cost center (WP8): month meter, thresholds, top-up.
+  await a.goto(`${base}/#/costs`);
+  await a.waitForSelector("#month-card");
+  assert.match(await a.textContent("#month-card"), /of \$20\.0000/);
+  await a.waitForSelector("text=Price table");
+  a.once("dialog", (d) => d.accept());
+  await a.fill("#c-topup", "5"); await a.click("text=Add to cap");
+  await a.waitForFunction(() => /of \$25\.0000/.test(document.getElementById("month-card")?.textContent || ""), null, { timeout: 5000 });
+
+  // 6c. A task that runs out of budget offers the five options (driven through the API, mock worker, no cost).
+  const hdr = { "X-CPM-Token": token, "Content-Type": "application/json" };
+  const sess = await (await fetch(`${base}/api/session`, { headers: hdr })).json();
+  const post = async (path, body) => { const r = await fetch(`${base}${path}`, { method: "POST", headers: { ...hdr, "X-CPM-CSRF": sess.csrf }, body: JSON.stringify(body) }); assert.ok(r.ok, `${path} ${r.status}`); return r.json(); };
+  const alphaId = (await (await fetch(`${base}/api/projects`, { headers: hdr })).json()).projects.find((p) => p.name === "Alpha").id;
+  const burst = await post(`/api/projects/${alphaId}/tasks`, { title: "burst task", billing_mode: "mock" });
+  await post(`/api/tasks/${burst.id}/transition`, { to: "READY" });
+  await post(`/api/tasks/${burst.id}/runs`, { scenario: "budget_burst", scenario_args: { step_microusd: 600000 }, max_budget_microusd: 1000000 });
+  await a.goto(`${base}/#/task/${burst.id}`);
+  await a.waitForSelector("#budget-actions", { timeout: 15000 }).catch(async () => { await a.goto(`${base}/#/task/${burst.id}`); await a.waitForSelector("#budget-actions", { timeout: 10000 }); });
+  await a.goto(`${base}/#/costs`);
+  await a.waitForSelector("text=stopped for budget");
+  await a.goto(`${base}/#/task/${burst.id}`);
+  await a.waitForSelector("#budget-actions");
+  await a.fill("#b-amount", "1"); a.once("dialog", (d) => d.accept());
+  await a.click("text=Add budget");
+  await a.waitForFunction(() => /of \$3\.0000/.test(document.getElementById("task-budget")?.textContent || ""), null, { timeout: 5000 });
+
+  // 6d. Reservations and locks: claim a path, see it, release it.
+  await a.goto(`${base}/#/agents`);
+  await a.waitForSelector("text=Reservations and locks");
+  await a.fill(`#claim-path-${alphaId}`, "docs/");
+  await a.click(`[data-project='${alphaId}'] >> text=Claim path`);
+  await a.waitForSelector(`[data-project='${alphaId}'] td:text-is('docs/')`, { timeout: 5000 });
+  await a.click(`[data-project='${alphaId}'] >> text=Release`);
+  await a.waitForSelector(`[data-project='${alphaId}'] >> text=No claim`, { timeout: 5000 });
 
   assert.deepEqual(errors, [], errors.join("\n"));  // no page or console error while connected
 
