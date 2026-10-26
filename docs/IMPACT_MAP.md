@@ -1,4 +1,4 @@
-# IMPACT_MAP (WP7, v0.10.0, 2026-10-26)
+# IMPACT_MAP (WP7, v0.11.0, 2026-10-26)
 
 Rule: before editing a module, read its row; after editing, update the row, the chains and the change log (CLAUDE.md rules 2 and 22). Modules marked (built) exist in code; the others describe the planned design (ARCHITECTURE.md).
 
@@ -70,7 +70,7 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 - Never started by the scheduler: PAUSED, PAUSED_BUDGET (a person decides), BLOCKED by hand. COMPLETED is never set here.
 - Loop: `CPM_SCHEDULER=1` starts `run_forever` in the app lifespan (default off, so tests and `python -m cpm.main` stay inert; `scripts/start.ps1` turns it on). `POST /api/scheduler/tick` runs the same pass once. `pause` stops dispatch only (housekeeping continues); it is persisted in `settings`.
 - Hooks for later packages: `resources_for(task)` (WP12 lanes return `ResourceRequest`s such as `gpu`/`unity_editor`, which makes the task heavy), `start_args_for(task)` (scenario for mock runs, lane limits). WP10 owns reservations from TESTING on: the scheduler releases them when a task leaves RESERVED/RUNNING; the gate must `Admission.reserve`-style re-acquire if it needs paths during review.
-- No schema change (no migration; v0.10.0 follows 0004).
+- No schema change (no migration; v0.11.0 follows 0004; 0005 stays free).
 - Known gaps: `POST /api/tasks/{id}/runs` (manual start) still bypasses reservations, by design a person's explicit action (R-WP7-1); cooldowns are in memory and reset on restart; no UI yet for scheduler status (`GET /api/scheduler` only); the voice "restart when GPU free" rule (rule 49) comes with WP13 as a `resources_for` + lowest priority.
 
 ## 3. Open risks (see THREATS.md for the full list)
@@ -122,7 +122,7 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 ## 4. Change log
 | Date | Version | Change | By |
 |---|---|---|---|
-| 2026-10-26 | 0.10.0 | WP7: scheduler (`cpm.scheduler`): deterministic tick (heartbeat/release/stale-reserved demotion, external scan, dependency promotion, bounded auto-retry with identical-failure detection, dispatch by priority with heavy-short-first, global/per-project/heavy limits), deferral with backoff for refused starts, `/api/scheduler/*`, `CPM_SCHEDULER` loop in the app lifespan; no migration (touches `api/app`, `config`, `scripts/start.ps1`) | CPM Code thread (WP7) |
+| 2026-10-26 | 0.11.0 | WP7: scheduler (`cpm.scheduler`): deterministic tick (heartbeat/release/stale-reserved demotion, external scan, dependency promotion, bounded auto-retry with identical-failure detection, dispatch by priority with heavy-short-first, global/per-project/heavy limits), deferral with backoff for refused starts, `/api/scheduler/*`, `CPM_SCHEDULER` loop in the app lifespan; no migration (touches `api/app`, `config`, `scripts/start.ps1`) | CPM Code thread (WP7) |
 | 2026-10-26 | 0.9.0 | WP8: versioned price table (replaces `workers/estimate.py`), usage ledger with price version, atomic budget admission (`BEGIN IMMEDIATE`, month/project/task/credit ceilings), reservations released on every run end, 70/90/100 % threshold events, PAUSED_BUDGET resume + five options, manual credit balance and reconciliation, `/api/budget*` and `/api/tasks/{id}/budget(-action)`; migration 0004 (touches `db/models`, `workers/{supervisor,providers}`, `api/{app,runs}`; removes `workers/estimate.py`) | CPM Code thread (WP8) |
 | 2026-10-26 | 0.7.0 | WP15: web UI (dashboard, projects, Kanban + table, task page with live log, agent monitor, costs, git/review placeholder, settings/wizard, workspace-trust explanation), one-time WebSocket tickets (T-27 closed), CSP + static serving, `/api/dashboard`, `websockets` dependency, `start.ps1` opens the UI with the token fragment; no migration | CPM Code thread (WP15) |
 | 2026-10-26 | 0.8.0 | WP6: reservations (atomic multi-resource, prefix semantics, leases/heartbeat/expiry with liveness check, heavy=1 class), path normalisation (case, slashes, `..`, symlinks/junctions, `.meta`, 8.3), Desktop claims, read-only external lock adapters (build/blender lock files, gpu-lock folder, job board, devlock listing + `wrap_command`), admission (`READY -> RESERVED`, one visible blocker reason), main-tree change detection via git snapshots, `/api/*` routes in `api/locks.py`, profile fields `lock_files`/`lock_dirs`, migration 0003 (touches `db/models`, `profiles`, `profiles/nirandyr.yaml`, `api/app`) | CPM Code thread (WP6) |
