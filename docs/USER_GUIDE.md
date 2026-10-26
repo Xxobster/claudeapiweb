@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.6.0)
+# USER_GUIDE (v0.8.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -48,7 +48,7 @@ A run is one worker process for one task. It works in its own git worktree under
 - Untrusted projects: the worker may edit files in its worktree and read the project, but cannot run tests or linters (they execute repository code); trust the project first to allow `python -m pytest|ruff|mypy`. Workers can never push, fetch, use the network, or touch `.git`, `.claude` or `.mcp.json`.
 - Limits: `max_parallel_agents` from the wizard (default 3, hard maximum 8) counts running workers. Settings: `CPM_WORKTREE_ROOT` (default: `cpm-worktrees` next to the CPM folder, never inside OneDrive or inside the managed project).
 
-## Budget and cost center (v0.6.0, API only; the screen comes with the UI work package)
+## Budget and cost center (v0.8.0, API only; the screen comes with the UI work package)
 CPM keeps one ledger of every message's cost and refuses to start a run that would not fit. Every number is an **estimate** (token counts times the price table) until you reconcile it with the Console.
 - Where you see it: `GET /api/budget` (month, per project, held money, level 0/70/90/100, credit balance), `GET /api/tasks/{id}/budget`, `GET /api/budget/reservations` (money held by running workers).
 - Caps: the wizard sets task, project and monthly caps. Task = whole life of the task; project and month reset each UTC month. Without a monthly cap no billable run starts.
