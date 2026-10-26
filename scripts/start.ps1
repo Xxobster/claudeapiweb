@@ -19,6 +19,11 @@ for ($i = 0; $i -lt 40; $i++) {
     try { Invoke-RestMethod -Uri "$base/health" -TimeoutSec 2 | Out-Null; $ready = $true; break } catch { }
 }
 if (-not $ready) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue; throw "CPM did not become healthy." }
-Start-Process "$base/health"
+$dataDir = if ($env:CPM_DATA_DIR) { $env:CPM_DATA_DIR } else { Join-Path $root 'data' }
+$tokenFile = Join-Path $dataDir 'install_token'
+# The token travels in the URL fragment: browsers never send a fragment to the server, and the page
+# moves it into sessionStorage and removes it from the address bar (docs/THREATS.md T-39).
+$fragment = if (Test-Path $tokenFile) { "#token=" + (Get-Content $tokenFile -Raw).Trim() } else { "" }
+Start-Process "$base/$fragment"
 Write-Host "CPM running (pid $($server.Id)). Close this window or press Ctrl+C to stop."
 Wait-Process -Id $server.Id

@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from cpm import __version__
-from cpm.api import credentials, locks, projects, runs, tasks, wizard
+from cpm.api import credentials, dashboard, locks, projects, runs, tasks, ui, wizard
 from cpm.config import Settings, load_settings
 from cpm.db.engine import make_engine
 from cpm.db.migrate import upgrade
@@ -24,6 +24,7 @@ from cpm.providers.keycheck import HttpKeyValidator, KeyValidator, MockKeyValida
 from cpm.security.childenv import inherited_credential_vars
 from cpm.security.middleware import SecurityMiddleware
 from cpm.security.secrets_store import KeyringSecretStore, SecretStore
+from cpm.security.tickets import TicketStore
 from cpm.security.tokens import csrf_for, load_or_create_token
 from cpm.workers.supervisor import RunSupervisor
 
@@ -72,6 +73,7 @@ def create_app(
         engine, liveness=lambda task_id: app.state.supervisor.live_run_for_task(task_id) is not None
     )
     app.state.admission = Admission(engine, app.state.reservations)
+    app.state.tickets = TicketStore()
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_req: Request, exc: RequestValidationError) -> JSONResponse:
@@ -85,6 +87,9 @@ def create_app(
     app.include_router(tasks.router)
     app.include_router(runs.router)
     app.include_router(locks.router)
+    app.include_router(dashboard.router)
+    app.include_router(ui.router)
+    ui.mount_static(app)
 
     @app.get("/api/session")
     def session() -> dict[str, str]:
@@ -97,5 +102,7 @@ def create_app(
             revision = MigrationContext.configure(conn).get_current_revision()
         return {"status": "ok", "version": __version__, "db_revision": revision}
 
-    app.add_middleware(SecurityMiddleware, token=token, port=settings.port)
+    app.add_middleware(
+        SecurityMiddleware, token=token, port=settings.port, tickets=app.state.tickets
+    )
     return app

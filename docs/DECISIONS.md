@@ -71,5 +71,12 @@
 - External locks (Nirandyr rules 13, 24, 26, 27): `BUILD_RUNNING.lock`, `BLENDER_RUNNING.lock` and any `*.lock` in `D:\projects\gpu-locks` block heavy tasks (the voice job uses gpu_lock.sh, so it is covered by the folder); job-board rows block overlapping exclusive paths; devlock files are listed for display and device commands must go through `devlock.py run` (CPM builds the argv, never runs the repo script itself).
 - Open for the PC (Micah, no hurry, safe default applies): confirm where `BLENDER_RUNNING.lock` and any separate voice lock really live (assumed `D:\projects\game-build\BLENDER_RUNNING.lock`; voice assumed covered by gpu-locks), and show one real `docs/JOB_BOARD.md` so the parser can be checked against it. The parser fails closed (unknown status = claimed).
 - External edits are found by polling git (HEAD + status snapshot), not by a filesystem watcher: no dependency, same result for the purposes of scenario 7.
-- Version 0.6.0, migration 0003.
+- Version 0.8.0 (0.7.0 is WP15), migration 0003.
 
+## 2026-10-26 (WP15) — implementation choices (awaiting Micah only if he disagrees)
+- UI technology: plain HTML/CSS/ES modules served by FastAPI, no Node build and no third-party code (nothing to patch, nothing remote, strict CSP). English text (Q10).
+- WebSocket auth: one-time 30-second ticket bound to the stream path (`POST /api/ws-ticket`); the install token is never put in a URL. Closes T-27.
+- How the page gets the token: `scripts\start.ps1` opens `http://127.0.0.1:8765/#token=...`; the page stores it in this browser's localStorage (so several tabs work) and removes it from the address bar. "Lock" forgets it; pasting it works too.
+- Untrusted projects: every project/task screen says that workers do not load the project's CLAUDE.md, hooks, MCP or skills until the workspace is trusted, and that trusting lets repo scripts run on the PC.
+- Not faked: costs show only recorded ledger rows (estimated vs reconciled). Budget admission, reservations and review/diff screens are explicit "arrives with ..." notes until WP6-WP8/WP10 add their APIs (second UI PR then).
+- Browser tests: `tests/ui/e2e.mjs` (Node + Playwright, mock runs only) is run by hand, not in CI.
