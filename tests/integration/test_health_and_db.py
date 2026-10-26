@@ -20,7 +20,7 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["db_revision"] == "0001"
+    assert body["db_revision"] == "0002"
 
 
 def test_migrations_up_down(tmp_path):
@@ -61,7 +61,7 @@ def test_models_roundtrip(tmp_path):
         t = Task(project_id=p.id, title="t", estimate_microusd=1_500_000)
         s.add(t)
         s.commit()
-        assert s.get(Task, t.id).status == "DRAFT"
+        assert s.get(Task, t.id).status == "BACKLOG"
         assert s.get(Task, t.id).estimate_microusd == 1_500_000
 
 

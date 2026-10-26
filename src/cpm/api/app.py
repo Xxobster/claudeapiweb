@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from cpm import __version__
-from cpm.api import credentials, projects, wizard
+from cpm.api import credentials, projects, tasks, wizard
 from cpm.config import Settings, load_settings
 from cpm.db.engine import make_engine
 from cpm.db.migrate import upgrade
@@ -73,6 +73,7 @@ def create_app(
     app.include_router(credentials.router)
     app.include_router(wizard.router)
     app.include_router(projects.router)
+    app.include_router(tasks.router)
 
     @app.get("/api/session")
     def session() -> dict[str, str]:

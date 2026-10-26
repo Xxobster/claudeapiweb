@@ -121,3 +121,16 @@ def resolve_in_any(
         except PathPolicyError as exc:
             last = exc
     raise last or PathPolicyError("no approved root configured")
+
+
+def validate_relative(raw: str) -> str:
+    """Validate a project-relative path (e.g. a task's declared scope) and return it with '/'.
+
+    Purely syntactic: no filesystem access. Rejects absolute, drive, UNC, '..', NUL and
+    Windows-illegal components. A trailing '/' (prefix scope) is kept.
+    """
+    _check_text(raw)
+    uniform = raw.replace("\\", "/")
+    if uniform.startswith("/") or _DRIVE.match(uniform):
+        raise PathPolicyError(f"absolute path not allowed in a relative scope: {raw!r}")
+    return uniform
