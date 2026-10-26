@@ -226,3 +226,10 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 - Settings form: the three caps are required (task <= project <= global); labels and `required` added.
 - Pre-existing on this PC (not caused by this change): `tests/workers/test_runner.py` watchdog/process-tree tests and one integrate test fail on Windows; `test_detached_head_still_reports_status` passes alone (flaky under full run).
 
+## 2n. Windows follow-up (2026-10-27, v0.18.2)
+- `requirements.lock` now includes the `sdk` extra (`claude-agent-sdk` pinned, hashed); the CI lock check compiles with `--extra sdk`. `install.ps1` installs it, so live runs no longer need a manual pip step.
+- Real bug: `discovery/gitinfo._HARDEN` runs git with `GIT_CONFIG_NOSYSTEM`, which dropped Git for Windows' `core.autocrlf=true`; CRLF checkouts looked fully modified (inflated `dirty_count`, a second commit at integration). Fixed with `-c core.autocrlf=true` on Windows (line-ending normalisation only, no command execution).
+- Real bug: `migrations/env.py` never disposed its engine; the pooled connection kept `cpm.db-wal` locked on Windows (backup restore failed). `restore_backup` also retries the -wal/-shm unlink for ~2 s.
+- Test-only: `_alive` used `os.kill(pid, 0)`, which TERMINATES the process on Windows (watchdog/shutdown tests); POSIX-only `WNOHANG`/`SIGKILL`/file-mode checks are now guarded. `tests/recovery/reconcile.py` is POSIX-only by design (`/proc`).
+- Full suite on the PC before the last two fixes: 895 passed, 3 failed (2 fixed here, `test_scenario_9_resume_does_not_reset_cumulative_spend` passes alone: timing flake under load).
+

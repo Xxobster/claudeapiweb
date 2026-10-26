@@ -23,7 +23,7 @@ jobs:
         run: |
           pip install uv
           cp requirements.lock /tmp/check.lock  # keep committed pins; only real changes differ
-          uv pip compile pyproject.toml --extra dev --universal --python-version 3.12 \
+          uv pip compile pyproject.toml --extra dev --extra sdk --universal --python-version 3.12 \
             --generate-hashes -o /tmp/check.lock
           diff <(grep -v '^#' requirements.lock) <(grep -v '^#' /tmp/check.lock)
         shell: bash

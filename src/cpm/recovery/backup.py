@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import shutil
 import sqlite3
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -74,6 +75,20 @@ def list_backups(data_dir: Path) -> list[Path]:
     )
 
 
+def _unlink_retry(path: Path) -> None:
+    """Windows releases SQLite's -wal/-shm handles a moment after `close()`: retry for ~2 s."""
+    for attempt in range(20):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise BackupError(
+                    f"{path.name} is still in use; stop CPM before restoring"
+                ) from None
+            time.sleep(0.1)
+
+
 def restore_backup(source: Path, db_path: Path) -> Path:
     """Replace `db_path` by a verified copy of `source`. CPM must not be running."""
     if not source.is_file():
@@ -90,7 +105,7 @@ def restore_backup(source: Path, db_path: Path) -> Path:
             out.close()
             src.close()
     for ext in ("-wal", "-shm"):  # stale journal files would be replayed onto the restored file
-        db_path.with_name(db_path.name + ext).unlink(missing_ok=True)
+        _unlink_retry(db_path.with_name(db_path.name + ext))
     tmp = db_path.with_name(db_path.name + ".restoring")
     shutil.copy2(source, tmp)
     tmp.replace(db_path)

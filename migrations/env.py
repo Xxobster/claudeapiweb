@@ -25,6 +25,7 @@ def run_migrations_online() -> None:
         if violations:
             raise RuntimeError(f"foreign key violations after migration: {violations[:5]}")
         conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+    engine.dispose()  # release the pooled connection: Windows keeps the -wal file locked otherwise
 
 
 run_migrations_online()
