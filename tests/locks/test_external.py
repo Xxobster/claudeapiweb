@@ -80,8 +80,11 @@ def test_scan_does_not_run_repo_defined_filters(env):
     git(env.root, "config", "filter.evil.clean", f"touch {marker}; cat")
     write(env.root, ".gitattributes", "*.txt filter=evil\n")
     write(env.root, "a.txt", "one\n")
+    git(env.root, "-c", "filter.evil.clean=cat", "add", "-A")
+    git(env.root, "-c", "filter.evil.clean=cat", "commit", "-q", "-m", "tracked")
     w = ExternalWatcher(env.engine)
     w.scan(env.pid)
-    write(env.root, "a.txt", "two\n")
+    time.sleep(0.05)
+    write(env.root, "a.txt", "two\n")  # tracked file changed: git status must compare content
     w.scan(env.pid)
     assert not marker.exists()
