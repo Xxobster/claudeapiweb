@@ -121,3 +121,10 @@
 - Binary outputs (audio, models, textures) default to `ask`: the gate stops and tells you which files need your decision (Nirandyr rules on binaries). `lfs_only` accepts them when `.gitattributes` routes them to Git LFS; `deny` refuses them. CPM never edits `.gitattributes` or installs LFS.
 - A lane whose tool is missing on the PC is deferred (like a refused budget), not failed. A lane check that cannot run on this PC makes the gate wait instead of passing.
 - Version 0.15.0, migration 0007. No real API or GitHub call was made.
+
+## 2026-10-26 (WP13) - implementation choices (awaiting Micah only if he disagrees)
+- The voice lane is a profile entry (`lanes.voice` in `profiles/nirandyr.yaml`) plus four validators; the engine gained one generic field, `queue_bias`, so "voice is the lowest priority" (Nirandyr rule 49) is a scheduler rule, not a special case.
+- Only two commands are allowed: `python tools/voice/render_fixed.py [--check]`, exact, trusted workspace only. No `fetch_kokoro.sh`, `story_qc.py` or `make_ab.py` until they are reviewed and their arguments are known.
+- "Restart when the GPU is free" = a READY voice task waits behind the locks and starts when they clear, and the render itself resumes. A FAILED API-billed voice task is not auto-restarted (WP9 decision: no repeated spending without a person); the existing scheduler setting `retry_billing_modes` can include `api` if Micah wants it.
+- Loudness is gated RMS + sample peak in dBFS, not LUFS (no extra dependency). `.rva` is not decoded.
+- Version 0.16.0, no migration. No real API or GitHub call was made.

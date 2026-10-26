@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from cpm.db.models import Project
 from cpm.lanes import validators as _builtin  # noqa: F401  (registers the built-in validators)
+from cpm.lanes import voice as _voice  # noqa: F401  (registers the voice validators)
 from cpm.lanes.artifacts import check_artifacts
 from cpm.lanes.commands import describe, serialise
 from cpm.lanes.registry import (
@@ -135,6 +136,14 @@ class LaneService:
                 continue
             out.append(ResourceRequest(r.type, key, "excl", f"lane {ctx.lane_id}"))
         return out
+
+    def priority_bias(self, task: Any) -> int:
+        """Extra priority number of a lane task (0 = none): it yields to tasks with a lower one."""
+        try:
+            ctx = self.context(task.project_id, getattr(task, "lane", None))
+        except LaneError:
+            return 0
+        return ctx.spec.queue_bias if ctx else 0
 
     def start_args(self, task: Any) -> dict[str, Any]:
         try:

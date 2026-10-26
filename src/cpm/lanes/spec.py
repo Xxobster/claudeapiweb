@@ -214,6 +214,10 @@ class LaneSpec(Strict):
     artifacts: ArtifactPolicy = ArtifactPolicy()
     report: ReportFormat = ReportFormat()
     limits: Limits = Limits()
+    # Added to the priority of this lane's tasks in the scheduler's ready queue (lower number
+    # runs first, so a positive bias yields to every task without one). Voice uses it for
+    # Nirandyr rule 49 (builds first, then voice, then art).
+    queue_bias: int = Field(default=0, ge=0, le=5_000)
 
     @field_validator("required_tools", "required_paths")
     @classmethod
