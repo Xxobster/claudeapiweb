@@ -297,7 +297,7 @@ function taskTable(tasks) {
 // ---------------------------------------------------------------- lanes (WP12 API, read-only)
 const bullets = (items, empty_) => (items.length ? h("ul", null, items.map((i) => h("li", null, i))) : h("span", { class: "muted" }, empty_));
 
-function laneCard(l, tasks) {
+function laneCard(l, tasks, projectId) {
   const mine = tasks.filter((t) => t.lane === l.id);
   const cmdText = (c) => `${c.program}${c.prefix.length ? " " + c.prefix.join(" ") : ""}${Object.keys(c.flags).length ? " [" + Object.entries(c.flags).map(([f, k]) => (k === "none" ? f : `${f} <${k}>`)).join(" ") + "]" : ""}${c.positional !== "none" ? ` <${c.positional}>` : ""}`;
   const a = l.artifacts;
@@ -323,7 +323,33 @@ function laneCard(l, tasks) {
       h("tr", null, h("th", null, "Binary policy"), h("td", null, { ask: "stop and ask a person for each binary", lfs_only: "only when Git LFS tracks it", deny: "never" }[a.binary_policy] || a.binary_policy)))),
     h("h4", null, "Report format"),
     h("p", null, l.report.required_sections.length ? `The final answer must contain: ${l.report.required_sections.join(", ")}` : "Free form", h("span", { class: "muted" }, ` (at most ${l.report.max_chars} characters)`)),
+    laneTaskForm(l, projectId),
     Object.keys(l.required.tools).length + Object.keys(l.required.paths).length ? h("details", null, h("summary", null, "Required tools and paths"), bullets([...Object.entries(l.required.tools), ...Object.entries(l.required.paths)].map(([k, v]) => `${k}: ${v}`), "")) : null);
+}
+
+function laneTaskForm(l, projectId) {
+  const t = l.task_template;
+  if (!l.enabled) return h("p", { class: "muted" }, "This lane is disabled in the profile: no task can be created from it.");
+  const title = h("input", { class: "lt-title", size: 40, required: true, maxlength: 200 });
+  const prio = h("input", { class: "lt-prio", type: "number", value: "100", min: "0", max: "10000" });
+  const mode = h("select", { class: "lt-mode" }, ["mock", "api"].map((m) => h("option", { value: m }, m)));
+  const inputs = Object.fromEntries((t.required_inputs || []).map((n) => [n, h("input", { class: "lt-input", "data-input": n, size: 40, required: true, maxlength: 500 })]));
+  return h("form", { class: "lane-form", onsubmit: (e) => {
+    e.preventDefault();
+    if (mode.value === "api" && !confirm("This task is billed to the API when it runs (it is only created now, nothing is spent yet). Create it as an API task?")) return;
+    act(async () => {
+      const task = await api.post(`/api/projects/${projectId}/lanes/${l.id}/tasks`, { title: title.value, priority: Number(prio.value), billing_mode: mode.value, inputs: Object.fromEntries(Object.entries(inputs).map(([n, el]) => [n, el.value])) });
+      setBanner(`Task #${task.id} created in BACKLOG`, "info");
+      route(`#/task/${task.id}`);
+    });
+  } },
+  h("h4", null, "New task from this lane"),
+  t.description ? h("p", { class: "muted" }, t.description) : null,
+  t.default_acceptance && t.default_acceptance.length ? h("p", { class: "muted" }, `Acceptance added for you: ${t.default_acceptance.join("; ")}`) : null,
+  field(`Title${t.title_prefix ? ` (starts with “${t.title_prefix.trim()}”)` : ""}`, title),
+  Object.entries(inputs).map(([n, el]) => field(n.replace(/_/g, " "), el)),
+  h("div", { class: "row" }, field("Priority (lower runs first)", prio), field("Billing mode", mode)),
+  h("p", null, h("button", { class: "primary", type: "submit" }, "Create task in BACKLOG")));
 }
 
 async function lanesPane(projectId, tasks) {
@@ -332,7 +358,7 @@ async function lanesPane(projectId, tasks) {
   if (!res.lanes.length) return empty("This project's profile declares no lane. Lanes are defined in profiles/<project>.yaml.");
   return h("div", null,
     h("p", { class: "muted" }, "What each lane lets a worker do. The profile is the only place a lane is changed; this page only shows it. Every rule here is checked by CPM, not left to the worker."),
-    res.lanes.map((l) => laneCard(l, tasks)));
+    res.lanes.map((l) => laneCard(l, tasks, projectId)));
 }
 
 function laneCheckSummary(lc) {
