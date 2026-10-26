@@ -131,9 +131,16 @@ async function resourcesPane(project, onDone) {
     res.reservations.length ? h("table", null, h("thead", null, h("tr", null, ["Task", "Resource", "Mode", "Last heartbeat", "Lease until"].map((t) => h("th", null, t)))),
       h("tbody", null, res.reservations.map((r) => h("tr", null, h("td", null, link(`#/task/${r.task_id}`, `#${r.task_id}`)), h("td", null, r.label || `${r.type}: ${r.key}`), h("td", null, r.mode), h("td", null, when(r.heartbeat_at)), h("td", null, when(r.lease_expires_at)))))) : h("p", { class: "muted" }, "Nothing reserved."),
     h("h3", null, "Claimed by you in Claude Desktop"),
-    claims.claims.length ? h("table", null, h("thead", null, h("tr", null, ["Path", "Note", "Expires", "Tasks affected", ""].map((t) => h("th", null, t)))),
-      h("tbody", null, claims.claims.map((c) => h("tr", null, h("td", null, c.path), h("td", null, c.note || "—"), h("td", null, c.expires_at ? when(c.expires_at) : "never"), h("td", null, (c.affected_tasks || []).length ? c.affected_tasks.map((t) => link(`#/task/${t}`, `#${t} `)) : "—"), h("td", null, h("button", { onclick: () => act(() => api.del(`/api/desktop-claims/${c.id}`), onDone) }, "Release")))))) : h("p", { class: "muted" }, "No claim. Workers will not touch a path you claim."),
-    h("form", { class: "row", onsubmit: (e) => { e.preventDefault(); act(() => api.post(`/api/projects/${project.id}/desktop-claims`, { path: path.value, note: note.value }), onDone); } }, path, note, h("button", { type: "submit" }, "Claim path")),
+    claims.claims.length ? h("table", null, h("thead", null, h("tr", null, ["Path", "Note", "Expires", ""].map((t) => h("th", null, t)))),
+      h("tbody", null, claims.claims.map((c) => h("tr", null, h("td", null, c.path), h("td", null, c.note || "—"), h("td", null, c.expires_at ? when(c.expires_at) : "never"), h("td", null, h("button", { onclick: () => act(() => api.del(`/api/desktop-claims/${c.id}`), onDone) }, "Release")))))) : h("p", { class: "muted" }, "No claim. Workers will not touch a path you claim."),
+    h("form", { class: "row", onsubmit: (e) => {
+      e.preventDefault();
+      let made = null;  // the list endpoint never carries affected_tasks, only the creation answer does
+      act(async () => { made = await api.post(`/api/projects/${project.id}/desktop-claims`, { path: path.value, note: note.value }); }, async () => {
+        await onDone();
+        if (made && made.affected_tasks.length) setBanner(`Claim added, but task(s) ${made.affected_tasks.map((t) => `#${t}`).join(", ")} already hold this path and keep running. Pause them before you edit it.`, "info");
+      });
+    } }, path, note, h("button", { type: "submit" }, "Claim path")),
     h("h3", null, "The project's own locks (read-only)"),
     locks.locks.length ? h("ul", null, locks.locks.map((l) => h("li", null, h("strong", null, l.name), ` ${l.active ? "HELD" : "free"} `, h("span", { class: "muted" }, lockDetail(l))))) : h("p", { class: "muted" }, "No external lock configured for this project."),
     h("div", { class: "row" }, h("button", { onclick: () => act(async () => { const r = await api.post(`/api/projects/${project.id}/external-scan`); scanOut.textContent = r.conflicts.length ? `${r.conflicts.length} task(s) have reserved paths edited in the main tree: ${r.conflicts.map((c) => `#${c.task_id} (${c.paths.join(", ")})`).join("; ")}` : `${r.changed.length} changed file(s) in the main tree, none on a reserved path.`; }) }, "Scan the main tree for outside edits"), scanOut));
@@ -253,10 +260,11 @@ function addPane(id) {
 // ---------------------------------------------------------------- task + live monitor
 // Why a task cannot start now (WP6 admission) and the manual release of a stuck reservation.
 function conflictsBox(why, onDone, taskId) {
-  if (!why.blockers.length) return h("div", { class: "note", id: "conflicts" }, "No lock or reservation blocks this task right now.");
+  // The release button is always offered: the holder of a stale reservation is not blocked by it, so "no blockers" must not hide it.
+  const release = h("button", { onclick: () => confirm("Release this task's own reservations? Only do this if nothing is working on it.") && act(() => api.post(`/api/tasks/${taskId}/reservations/release`), onDone) }, "Release this task's reservations");
+  if (!why.blockers.length) return h("div", { class: "note", id: "conflicts" }, "No lock or reservation blocks this task right now. ", release);
   return h("div", { class: "note warn", id: "conflicts" }, h("strong", null, "Blocked by:"),
-    h("ul", null, why.blockers.map((b) => h("li", null, `${b.message}`, b.holder_task_id ? [" (", link(`#/task/${b.holder_task_id}`, `task #${b.holder_task_id}`), ")"] : null))),
-    h("button", { onclick: () => confirm("Release this task's own reservations? Only do this if nothing is working on it.") && act(() => api.post(`/api/tasks/${taskId}/reservations/release`), onDone) }, "Release this task's reservations"));
+    h("ul", null, why.blockers.map((b) => h("li", null, `${b.message}`, b.holder_task_id ? [" (", link(`#/task/${b.holder_task_id}`, `task #${b.holder_task_id}`), ")"] : null))), release);
 }
 
 async function taskView(id) {
