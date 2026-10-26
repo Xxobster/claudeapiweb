@@ -150,3 +150,12 @@ def test_stress_50_threads_overlapping_sets_never_double_grant(env):
     for i, ok in results.items():
         if not ok:
             assert env.res.active(task_id=tasks[i].id) == []
+
+
+def test_equivalent_scope_entries_are_coalesced(env):
+    a = env.task("Assets/Hero.prefab", "Assets/Hero.prefab.meta", "ASSETS/hero.prefab", ready=True)
+    assert env.adm.reserve(a.id).status == "RESERVED"
+    assert len(env.res.active(task_id=a.id)) == 1
+    b = env.task()
+    env.res.acquire(b.id, env.pid, [p("x.txt", "shared"), p("x.txt", "excl")])
+    assert [r.mode for r in env.res.active(task_id=b.id)] == ["excl"]

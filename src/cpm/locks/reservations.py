@@ -86,10 +86,17 @@ class ReservationService:
         if len(requests) > MAX_REQUESTS:
             raise ValueError(f"more than {MAX_REQUESTS} resources requested")
         heavy = heavy_types if heavy_types is not None else self.heavy_types
-        out: list[ResourceRequest] = []
+        # Coalesce by canonical identity: `Hero.prefab` and `Hero.prefab.meta`, case variants and
+        # symlink aliases are one resource (the stricter mode wins, the first label is kept).
+        merged: dict[tuple[str, str], ResourceRequest] = {}
         for r in requests:
-            if r not in out:
-                out.append(r)
+            ident = (r.type, r.key)
+            prev = merged.get(ident)
+            if prev is None:
+                merged[ident] = r
+            elif prev.mode == "shared" and r.mode == "excl":
+                merged[ident] = ResourceRequest(r.type, r.key, "excl", prev.label)
+        out = list(merged.values())
         if any(r.type in heavy for r in out) and _HEAVY_REQ not in out:
             out.append(_HEAVY_REQ)
         return out

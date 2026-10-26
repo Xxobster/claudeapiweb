@@ -75,9 +75,12 @@ def take_snapshot(root: Path) -> Snapshot:
     except gitinfo.GitUnavailableError:
         head = ""  # empty repository
     prefix = gitinfo._git(root, "rev-parse", "--show-prefix").strip()
+    # `git status` runs repo-defined clean/smudge filters; blank them like gitinfo.inspect does.
     out = gitinfo._git(
-        root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"
-    )
+        root,
+        "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames",
+        config=gitinfo._filter_overrides(root),
+    )  # fmt: skip
     entries: dict[str, Entry] = {}
     truncated = False
     for rec in out.split("\0"):

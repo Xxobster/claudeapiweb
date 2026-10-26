@@ -73,3 +73,15 @@ def test_case_and_meta_spellings_still_match(env):
     w.scan(env.pid)
     write(env.root, "Assets/Game/Hero.prefab.meta", "guid: 1\n")
     assert [c.task_id for c in w.scan(env.pid).conflicts] == [t.id]
+
+
+def test_scan_does_not_run_repo_defined_filters(env):
+    marker = env.tmp / "filter-ran"
+    git(env.root, "config", "filter.evil.clean", f"touch {marker}; cat")
+    write(env.root, ".gitattributes", "*.txt filter=evil\n")
+    write(env.root, "a.txt", "one\n")
+    w = ExternalWatcher(env.engine)
+    w.scan(env.pid)
+    write(env.root, "a.txt", "two\n")
+    w.scan(env.pid)
+    assert not marker.exists()
