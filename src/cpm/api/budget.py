@@ -30,6 +30,12 @@ def _led(request: Request) -> BudgetLedger:
     return request.app.state.supervisor.ledger  # type: ignore[no-any-return]
 
 
+def _task_default(request: Request, billing_mode: str) -> int | None:
+    """The ceiling API tasks get when no task budget is configured (same as admission)."""
+    live_max = request.app.state.settings.live_run_max_microusd
+    return int(live_max) if billing_mode == "api" else None
+
+
 def _micro(usd: Decimal) -> int:
     return int(usd * _MICRO)
 
@@ -80,7 +86,13 @@ def task_budget(request: Request, task_id: int) -> dict[str, Any]:
     task = _call(TaskService(request.app.state.engine).get, task_id)
     spent = led.task_spent(task_id)
     try:
-        cap: int | None = led.effective_cap("task", str(task_id), task.project_id, task_id)
+        cap: int | None = led.effective_cap(
+            "task",
+            str(task_id),
+            task.project_id,
+            task_id,
+            _task_default(request, task.billing_mode),
+        )
     except BudgetError:
         cap = None
     out = {
@@ -129,6 +141,7 @@ def top_up(request: Request, body: TopUpIn) -> dict[str, Any]:
     """Add a fixed amount to a cap. The caller is the explicit authorisation to spend more."""
     led = _led(request)
     project_id = task_id = 0
+    default: int | None = None
     ref = body.ref
     if body.scope == "month":
         ref = ref or period_of()
@@ -139,9 +152,11 @@ def top_up(request: Request, body: TopUpIn) -> dict[str, Any]:
             project_id = int(ref)
         else:
             task_id = int(ref)
-            project_id = _call(TaskService(request.app.state.engine).get, task_id).project_id
+            t = _call(TaskService(request.app.state.engine).get, task_id)
+            project_id, default = t.project_id, _task_default(request, t.billing_mode)
     new = _call(led.add_to_cap, body.scope, ref, _micro(body.amount_usd),
-                project_id=project_id, task_id=task_id)  # fmt: skip
+                project_id=project_id, task_id=task_id,
+                task_default=default)  # fmt: skip
     return _with_usd({"scope": body.scope, "ref": ref, "cap_microusd": new})
 
 
@@ -227,12 +242,19 @@ def budget_action(request: Request, task_id: int, body: BudgetActionIn) -> dict[
         result["cap_microusd"] = _call(
             led.add_to_cap, "task", str(task_id), _micro(body.amount_usd),
             project_id=task.project_id, task_id=task_id,
+            task_default=_task_default(request, task.billing_mode),
         )  # fmt: skip
     elif body.action == "resume_no_increase":
         spent = led.task_spent(task_id)
         cap = None
         try:
-            cap = led.effective_cap("task", str(task_id), task.project_id, task_id)
+            cap = led.effective_cap(
+                "task",
+                str(task_id),
+                task.project_id,
+                task_id,
+                _task_default(request, task.billing_mode),
+            )
         except BudgetError:
             pass
         result |= {"spent_microusd": spent, "cap_microusd": cap,

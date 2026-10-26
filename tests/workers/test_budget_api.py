@@ -168,3 +168,25 @@ def test_top_up_then_resume_no_increase_reports_the_headroom(api):
         f"/api/tasks/{tid}/budget-action", json={"action": "resume_no_increase"}, headers=h
     )
     assert out.status_code == 200 and out.json()["headroom_usd"] == "1.8"
+
+
+def test_api_task_without_task_budget_reports_and_raises_the_fallback_cap(api):
+    c, h, pid = api
+    from cpm.db.settings_repo import set_setting
+
+    set_setting(
+        c.app.state.engine, "wizard.config",
+        {"global_budget_microusd": 10 * USD, "project_budget_microusd": 10 * USD,
+         "task_budget_microusd": 0},
+    )  # fmt: skip
+    tid = c.post(
+        f"/api/projects/{pid}/tasks", json={"title": "T", "billing_mode": "api"}, headers=h
+    ).json()["id"]
+    live_max = c.app.state.settings.live_run_max_microusd
+    tb = c.get(f"/api/tasks/{tid}/budget", headers=h).json()
+    assert tb["cap_microusd"] == live_max
+    up = c.post(
+        "/api/budget/top-up", headers=h,
+        json={"scope": "task", "ref": str(tid), "amount_usd": "1"},
+    )  # fmt: skip
+    assert up.status_code == 200 and up.json()["cap_microusd"] == live_max + USD

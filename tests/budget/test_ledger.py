@@ -285,3 +285,34 @@ def test_usage_rows_are_priced_from_the_table_when_no_cost_given(led):
         u = s.scalars(select(UsageEvent)).one()
         assert u.price_version == 1 and u.reconciled is False
         assert utcnow() - u.ts.replace(tzinfo=utcnow().tzinfo) < timedelta(minutes=1)
+
+
+def test_project_alerts_restart_each_month(led, monkeypatch):
+    import cpm.budget.ledger as mod
+    from cpm.db.settings_repo import get_setting
+
+    set_cfg(led.engine, month=100, project=3, task=100)
+    run = add_run(led.engine, 1)
+    spend(led, run, 1, 1, 2_500_000, "a")  # 83 % of the 3 USD project cap
+    assert [a.scope for a in led.check_thresholds(1, 1)] == ["project"]
+    assert led.check_thresholds(1, 1) == []
+    keys = list(get_setting(led.engine, "budget.alerts"))
+    assert len(keys) == 1 and period_of() in keys[0]  # the key carries the month
+    # next month the project has spent nothing yet: no alert, and the old key cannot mute it
+    monkeypatch.setattr(mod, "period_of", lambda dt=None: "2099-01")
+    assert led.check_thresholds(1, 1) == []
+
+
+def test_effective_cap_matches_admission_default_for_api_tasks(led):
+    set_cfg(led.engine, month=10, project=10, task=0)
+    with pytest.raises(BudgetError):
+        led.effective_cap("task", "1", 1, 1)  # no configured cap, no default
+    assert led.effective_cap("task", "1", 1, 1, task_default=2 * USD) == 2 * USD
+    assert (
+        led.add_to_cap("task", "1", USD, project_id=1, task_id=1, task_default=2 * USD) == 3 * USD
+    )
+    assert led.effective_cap("task", "1", 1, 1, task_default=2 * USD) == 3 * USD
+    run = add_run(led.engine, 1)
+    spend(led, run, 1, 1, 3 * USD, "a")
+    with pytest.raises(BudgetDenied):
+        led.admit(1, 1, 1, task_cap_default=2 * USD)  # override 3 USD is spent

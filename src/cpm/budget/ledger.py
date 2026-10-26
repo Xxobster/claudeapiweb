@@ -380,7 +380,9 @@ class BudgetLedger:
                     continue
                 pct = spent * 100 // cap
                 level = max((lv for lv in LEVELS if pct >= lv), default=0)
-                key = f"{scope}:{ref}:{cap}"  # a raised cap starts a fresh series of alerts
+                # a raised cap starts a fresh series of alerts; project caps restart every month
+                per = f"{period}:" if scope == "project" else ""
+                key = f"{scope}:{ref}:{per}{cap}"
                 if level and level > seen.get(key, 0):
                     seen[key] = level
                     changed = True
@@ -428,22 +430,28 @@ class BudgetLedger:
             s.commit()
 
     # ------------------------------------------------------------------ caps, credit, reconcile
-    def effective_cap(self, scope: Scope, ref: str, project_id: int = 0, task_id: int = 0) -> int:
+    def effective_cap(
+        self, scope: Scope, ref: str, project_id: int = 0, task_id: int = 0,
+        task_default: int | None = None,
+    ) -> int:  # fmt: skip
         period = ref if scope == "month" else period_of()
         with self.engine.connect() as conn:
             caps = self._caps(conn, project_id, task_id, period)
-        cap = {"month": caps.month, "project": caps.project, "task": caps.task}[scope]
+        cap = {"month": caps.month, "project": caps.project, "task": caps.task or task_default}[
+            scope
+        ]  # the same task ceiling admission uses (`admit(task_cap_default=...)`)
         if cap is None:
             raise BudgetError(f"no {scope} cap is configured")
         return cap
 
     def add_to_cap(
-        self, scope: Scope, ref: str, amount_microusd: int, *, project_id: int = 0, task_id: int = 0
-    ) -> int:
+        self, scope: Scope, ref: str, amount_microusd: int, *, project_id: int = 0,
+        task_id: int = 0, task_default: int | None = None,
+    ) -> int:  # fmt: skip
         """Add a fixed amount to a cap (the user's explicit authorisation). Returns the new cap."""
         if not 0 < amount_microusd <= MAX_TOPUP_MICROUSD:
             raise BudgetError("top-up must be positive and at most 10,000 USD")
-        new = self.effective_cap(scope, ref, project_id, task_id) + amount_microusd
+        new = self.effective_cap(scope, ref, project_id, task_id, task_default) + amount_microusd
         self._set_override(scope, ref, new)
         return new
 
