@@ -47,9 +47,7 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _git(
-    root: Path, *args: str, config: tuple[str, ...] = (), timeout: int = TIMEOUT_S
-) -> str:
+def _git(root: Path, *args: str, config: tuple[str, ...] = (), timeout: int = TIMEOUT_S) -> str:
     cmd = ["git", *_HARDEN, *config, "-C", str(root), *args]
     try:
         done = subprocess.run(  # noqa: S603

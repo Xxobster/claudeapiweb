@@ -21,7 +21,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cpm.workers.estimate import estimate_microusd
 from cpm.workers.permissions import Decision, ToolContext, decide
 
 Emit = Callable[..., None]
@@ -252,11 +251,15 @@ class AgentSdkProvider:
                 int(u.get("cache_creation_input_tokens", 0)),
             )  # fmt: skip
             self.emit(
-                "usage", message_id=mid, model=msg.model,
-                input_tokens=tokens[0], output_tokens=tokens[1],
-                cache_read_tokens=tokens[2], cache_write_tokens=tokens[3],
-                cost_microusd=estimate_microusd(msg.model, *tokens),
+                "usage",
+                message_id=mid,
+                model=msg.model,
+                input_tokens=tokens[0],
+                output_tokens=tokens[1],
+                cache_read_tokens=tokens[2],
+                cache_write_tokens=tokens[3],
             )  # fmt: skip
+            # no cost here: the supervisor prices the tokens from the DB table (WP8)
 
 
 def make_provider(spec: RunSpec, emit: Emit, stop: threading.Event) -> Any:

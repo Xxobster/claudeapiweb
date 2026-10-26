@@ -182,6 +182,7 @@ class UsageEvent(Base):
     cache_write_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
     cost_microusd: Mapped[int] = mapped_column(BigInteger, default=0)
     reconciled: Mapped[bool] = mapped_column(default=False)  # False = client-side estimate
+    price_version: Mapped[int | None] = mapped_column(Integer)  # prices.version used (WP8)
 
 
 class Budget(Base):
@@ -194,6 +195,55 @@ class Budget(Base):
     __table_args__ = (
         UniqueConstraint("scope", "scope_ref"),
         CheckConstraint("cap_microusd >= 0", name="cap_nonneg"),
+    )
+
+
+class Price(Base):
+    """Versioned price table, micro-USD per million tokens. A new row = a new version (WP8)."""
+
+    __tablename__ = "prices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model: Mapped[str] = mapped_column(String(64))
+    version: Mapped[int] = mapped_column(Integer)
+    input_mtok: Mapped[int] = mapped_column(BigInteger)
+    output_mtok: Mapped[int] = mapped_column(BigInteger)
+    cache_read_mtok: Mapped[int] = mapped_column(BigInteger)
+    cache_write_mtok: Mapped[int] = mapped_column(BigInteger)  # 5-minute cache writes
+    # Optional higher tier once the prompt (input + cache read + cache write) exceeds this size.
+    long_threshold: Mapped[int | None] = mapped_column(BigInteger)
+    long_input_mtok: Mapped[int | None] = mapped_column(BigInteger)
+    long_output_mtok: Mapped[int | None] = mapped_column(BigInteger)
+    long_cache_read_mtok: Mapped[int | None] = mapped_column(BigInteger)
+    long_cache_write_mtok: Mapped[int | None] = mapped_column(BigInteger)
+    source: Mapped[str] = mapped_column(String(200), default="")
+    verified_on: Mapped[str] = mapped_column(String(10), default="")
+    created_at: Mapped[datetime] = _ts()
+    __table_args__ = (
+        UniqueConstraint("model", "version"),
+        CheckConstraint(
+            "input_mtok >= 0 AND output_mtok >= 0 AND cache_read_mtok >= 0"
+            " AND cache_write_mtok >= 0",
+            name="nonneg",
+        ),
+    )
+
+
+class BudgetReservation(Base):
+    """Money held for a run between admission and its end (WP8). Released exactly once."""
+
+    __tablename__ = "budget_reservations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"))
+    amount_microusd: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(8), default="held")
+    created_at: Mapped[datetime] = _ts()
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("status IN ('held','released')", name="status"),
+        CheckConstraint("amount_microusd > 0", name="positive"),
+        Index("ix_budget_reservations_status", "status"),
     )
 
 

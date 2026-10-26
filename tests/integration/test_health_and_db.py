@@ -12,7 +12,7 @@ from cpm.db.models import Project, Task
 
 TABLES = {
     "projects", "tasks", "task_deps", "runs", "events", "reservations",
-    "usage_events", "budgets", "project_sources", "settings", "prompts",
+    "usage_events", "budgets", "prices", "budget_reservations", "project_sources", "settings", "prompts",
 }  # fmt: skip
 
 
@@ -21,7 +21,7 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["db_revision"] == "0002"
+    assert body["db_revision"] == "0003"
 
 
 def test_migrations_up_down(tmp_path):
