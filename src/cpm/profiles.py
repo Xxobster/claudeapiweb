@@ -33,6 +33,10 @@ class Profile(BaseModel):
     memory_sources: list[str] = []
     task_sources: list[str] = []
     external_locks: dict[str, str] = {}
+    # name -> absolute file whose existence means "heavy work must not start" (BUILD_RUNNING.lock)
+    lock_files: dict[str, str] = {}
+    # name -> absolute folder; any `*.lock` file inside means the same (gpu_lock.sh files)
+    lock_dirs: dict[str, str] = {}
     heavy_resources: list[str] = []
     default_effort: str = "medium"
     pr_body_must_list: list[str] = []

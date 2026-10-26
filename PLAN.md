@@ -141,8 +141,12 @@ task_sources: [docs/JOB_BOARD.md, docs/COORDINATOR_INBOX.md]
 external_locks:
   job_board: docs/JOB_BOARD.md      # read-only in v1
   devlock: tools/devices/devlock.py
-  build_lock: D:\projects\game-build\BUILD_RUNNING.lock
   gpu_lock: tools/gpu_lock.sh
+lock_files:                       # WP6: existence = no heavy work (rule 26)
+  build_running: D:\projects\game-build\BUILD_RUNNING.lock
+  blender_running: D:\projects\game-build\BLENDER_RUNNING.lock   # location to confirm on the PC
+lock_dirs:
+  gpu_locks: D:\projects\gpu-locks     # any *.lock (tools/gpu_lock.sh)
 heavy_resources: [unity_editor, gpu, blender, device]
 default_effort: medium
 pr_body_must_list: [files_changed, security_findings, exploit_findings, what_needs_pc]

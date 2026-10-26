@@ -154,15 +154,33 @@ class Reservation(Base):
     __tablename__ = "reservations"
     id: Mapped[int] = mapped_column(primary_key=True)
     resource_type: Mapped[str] = mapped_column(String(32))  # path | unity_editor | gpu | ...
-    resource_key: Mapped[str] = mapped_column(Text)  # normalized (WP6)
+    resource_key: Mapped[str] = mapped_column(Text)  # normalized (cpm.locks.normalize)
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
     mode: Mapped[str] = mapped_column(String(8), default="excl")
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    label: Mapped[str] = mapped_column(Text, default="")  # human form shown in conflict messages
     lease_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (
         CheckConstraint("mode IN ('excl','shared')", name="mode"),
         Index("ix_reservations_resource", "resource_type", "resource_key"),
+        UniqueConstraint("task_id", "resource_type", "resource_key"),
     )
+
+
+class DesktopClaim(Base):
+    """"Desktop is working on these paths" (manual, optional expiry). Blocks exclusive requests."""
+
+    __tablename__ = "desktop_claims"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    path_key: Mapped[str] = mapped_column(Text)  # normalized, see cpm.locks.normalize
+    label: Mapped[str] = mapped_column(Text)
+    note: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = _ts()
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (Index("ix_desktop_claims_project", "project_id", "released_at"),)
 
 
 class UsageEvent(Base):
