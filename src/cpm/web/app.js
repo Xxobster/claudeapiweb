@@ -578,7 +578,28 @@ async function reviewPane(task, onDone) {
     changes.error ? null : h("div", { class: "muted" }, `Branch ${changes.branch} against ${changes.base_ref} (${changes.base})${changes.unexpected ? ` · ${changes.unexpected} unexpected file(s)` : ""}`),
     head, files, diffBox,
     h("h3", null, `Acceptance gate (up to ${rv.max_corrections} corrections)`), history,
-    integrationBox(task, rv.integration, onDone));
+    integrationBox(task, rv.integration, onDone),
+    jobBoardBox(task, onDone));
+}
+
+function jobBoardBox(task, onDone) {
+  const id = task.id;
+  const box = h("div", { class: "card", id: "job-board" }, h("h3", null, "Job board"), h("p", { class: "muted" }, "Loading…"));
+  api.get(`/api/tasks/${id}/job-board`).then((st) => {
+    const prLink = (i) => (i && i.pr_url && /^https:\/\/github\.com\//.test(i.pr_url) ? h("a", { href: i.pr_url, rel: "noopener noreferrer", target: "_blank" }, `#${i.pr_number}`) : i ? `#${i.pr_number}` : null);
+    const open = (i) => i && i.state === "pr_open";
+    const rows = [h("p", { class: "muted" }, "Rule 40: other threads see this task's files as claimed once a docs-only pull request that adds a row to the job board is merged. CPM opens it; you merge it on GitHub.")];
+    if (st.problem) rows.push(h("div", { class: "note warn" }, st.problem));
+    if (st.on_board) rows.push(h("p", null, `On the base branch's board: ${st.on_board}`));
+    if (open(st.claim)) rows.push(h("p", null, "Claim pull request ", prLink(st.claim)));
+    if (open(st.release)) rows.push(h("p", null, "Release pull request ", prLink(st.release)));
+    const buttons = [];
+    if (!open(st.claim) && !st.release) buttons.push(h("button", { id: "jb-claim", onclick: () => confirm("Open a docs-only pull request that claims this task's files on the job board?") && act(async () => { const r = await api.post(`/api/tasks/${id}/job-board/claim`, {}); setBanner(`Claim pull request #${r.pr_number} opened`, "info"); }, onDone) }, st.claim ? "Retry claim pull request" : "Claim files on the job board"));
+    if (st.claim && !open(st.release)) buttons.push(h("button", { id: "jb-release", onclick: () => confirm("Open a docs-only pull request that releases this task's claim?") && act(async () => { const r = await api.post(`/api/tasks/${id}/job-board/release`, {}); setBanner(`Release pull request #${r.pr_number} opened`, "info"); }, onDone) }, st.release ? "Retry release pull request" : "Release the claim"));
+    if (buttons.length) rows.push(h("p", { class: "row" }, buttons));
+    box.replaceChildren(h("h3", null, "Job board"), ...rows);
+  }).catch(() => box.replaceChildren(h("h3", null, "Job board"), h("p", { class: "muted" }, "Not available for this task.")));
+  return box;
 }
 
 function integrationBox(task, integ, onDone) {

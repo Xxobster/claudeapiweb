@@ -109,3 +109,8 @@
 - PR text always has: files changed, how it was tested, security findings, exploit findings, what still needs the PC (Nirandyr rules 37-40).
 - Version 0.13.0, migration 0005.
 
+## 2026-10-26 (WP11) - implementation choices (awaiting Micah only if he disagrees)
+- Q6 answered in code: CPM reads the job board (WP6) and now also writes it, only through a docs-only PR per action (claim, release), never in place and never on its own: each is a button (UI confirmation) on the task page. Merging the PR stays Micah's click.
+- A claim row is `CPM #<task id>: <title> | cpm | <declared scope> | claimed | <date>`; release marks the same row `released` and keeps it. The claimed set is the task's declared scope.
+- The board is edited only if it has a Markdown table with files, status and job columns; otherwise CPM refuses (the real layout is still to verify on the PC).
+- Version 0.14.0, migration 0006.

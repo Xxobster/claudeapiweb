@@ -280,9 +280,16 @@ def push_branch(
     remote: str,
     token: str | None,
     protected: Sequence[str] = ("main",),
+    source: str | None = None,
 ) -> None:
-    """Push `refs/heads/<branch>` to `remote`. Never a force, never a protected branch."""
+    """Push `refs/heads/<branch>` to `remote`. Never a force, never a protected branch.
+
+    `source` (a full commit sha) pushes that commit instead of the local branch, so a commit
+    built with plumbing needs no local branch (job board claims, WP11).
+    """
     guard_push(branch, protected)
+    if source is not None and not _SHA.match(source):
+        raise GitOpError("push source must be a full commit sha")
     env: dict[str, str] = {}
     cfg: list[str] = ["-c", "credential.helper="]
     if token:
@@ -302,7 +309,7 @@ def push_branch(
         "--no-verify",
         "--",
         remote,
-        f"{ref}:{ref}",
+        f"{source or ref}:{ref}",
         config=cfg,
         env_extra=env,
         timeout=PUSH_TIMEOUT_S,
@@ -323,3 +330,60 @@ def guard_push(branch: str, protected: Sequence[str]) -> None:
 def branch_head(worktree: Path) -> tuple[str, str]:
     branch = _g(worktree, "symbolic-ref", "--short", "-q", "HEAD").strip()
     return branch, _g(worktree, "rev-parse", "HEAD").strip()
+
+
+def _run_bytes(root: Path, args: Sequence[str], data: bytes | None = None) -> bytes:
+    """Like `run`, but binary in and out: no newline translation on Windows."""
+    cmd = ["git", *_HARDEN, *_filter_overrides(root), "-C", str(root), *args]
+    try:
+        done = subprocess.run(  # noqa: S603
+            cmd, input=data, capture_output=True, timeout=TIMEOUT_S, env=_env(), check=False
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GitOpError(f"git {args[0]}: {type(exc).__name__}") from exc
+    if done.returncode != 0:
+        lines = done.stderr.decode("utf-8", "replace").strip().splitlines()
+        detail = redact(lines[-1] if lines else "")[:300]
+        raise GitOpError(f"git {args[0]} exited with {done.returncode}: {detail}")
+    return done.stdout
+
+
+def read_blob(project: Path, commit: str, rel: str, max_bytes: int) -> bytes | None:
+    """Bytes of `rel` at `commit` (None if absent). Reads the object store only."""
+    if not _SHA.match(commit):
+        raise GitOpError("a full commit sha is required")
+    spec = f"{commit}:{rel}"
+    listing = run(project, "ls-tree", commit, "--", f":(literal){rel}")[1]
+    if not listing.strip():
+        return None
+    if listing.split(" ", 1)[0] not in ("100644", "100755"):
+        raise GitOpError(f"{rel} is not a regular file at the base commit")
+    size = int(run(project, "cat-file", "-s", spec)[1].strip() or 0)
+    if size > max_bytes:
+        raise GitOpError(f"{rel} is larger than {max_bytes} bytes")
+    return _run_bytes(project, ["cat-file", "blob", spec])
+
+
+def commit_blob(project: Path, base: str, rel: str, data: bytes, message: str) -> str:
+    """A commit on top of `base` that replaces ONLY `rel` with `data` (object store only).
+
+    Uses a temporary index and `commit-tree`: no ref, working tree or real index is touched, so
+    the managed project's main tree cannot be disturbed. The file mode of `rel` is kept.
+    """
+    if not _SHA.match(base):
+        raise GitOpError("a full commit sha is required")
+    code, listing = run(project, "ls-tree", base, "--", f":(literal){rel}", ok_codes=(0,))
+    mode = listing.split(" ", 1)[0] if listing.strip() else "100644"
+    if mode not in ("100644", "100755"):
+        raise GitOpError(f"{rel} is not a regular file at the base commit")
+    blob = _run_bytes(project, ["hash-object", "-w", "--no-filters", "--stdin"], data)
+    with tempfile.TemporaryDirectory(prefix="cpm-index-") as tmp:
+        idx = {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
+        _g(project, "read-tree", base, env_extra=idx)
+        _g(
+            project, "update-index", "--add", "--cacheinfo",
+            f"{mode},{blob.decode().strip()},{rel}", env_extra=idx,
+        )  # fmt: skip
+        tree = _g(project, "write-tree", env_extra=idx).strip()
+    msg = _CTRL.sub(" ", message)[:300]
+    return _g(project, "commit-tree", tree, "-p", base, "-m", msg, config=_IDENT).strip()
