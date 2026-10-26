@@ -1,9 +1,11 @@
-# USER_GUIDE (v0.15.0)
+# USER_GUIDE (v0.18.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
 2. `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1` creates `.venv`, installs CPM and creates the database in `data\cpm.db`.
 3. `powershell -ExecutionPolicy Bypass -File scripts\start.ps1` starts the server on `http://127.0.0.1:8765` and opens `/health` in the browser.
+
+Shortcut route (v0.18.0): `powershell -File scripts\install.ps1` does steps 2 and a "Claude Project Manager" shortcut on the Desktop and Start Menu (`-NoShortcut` to skip). `scripts\uninstall.ps1` removes shortcuts and `.venv` and keeps `data\` and your worktrees. Documents: `README.md`, `docs/SECURITY.md`, `docs/KNOWN_LIMITATIONS.md`, `docs/TEST_REPORT.md`, `docs/API.md`.
 
 ## Configuration (environment variables, all optional)
 | Variable | Default | Note |

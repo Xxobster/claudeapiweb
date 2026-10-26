@@ -135,3 +135,9 @@
 - "Restart when the GPU is free" = a READY voice task waits behind the locks and starts when they clear, and the render itself resumes. A FAILED API-billed voice task is not auto-restarted (WP9 decision: no repeated spending without a person); the existing scheduler setting `retry_billing_modes` can include `api` if Micah wants it.
 - Loudness is gated RMS + sample peak in dBFS, not LUFS (no extra dependency). `.rva` is not decoded.
 - Version 0.17.0, no migration. No real API or GitHub call was made.
+
+## 2026-10-26 (WP16) - implementation choices (awaiting Micah only if he disagrees)
+- WP16 is closed as far as the cloud can go: scenario matrix, hardening sweep, installers, docs and test report are in. What only the PC can prove is listed in `docs/KNOWN_LIMITATIONS.md` section 1 (first live run of 2 USD still needs Micah's go).
+- The 20 scenarios are proved by named existing tests; a test fails if one is renamed or deleted. The API reference is generated from the code and checked by a test.
+- Installer: `scripts/install.ps1` = setup + Desktop and Start Menu shortcuts; `uninstall.ps1` removes shortcuts and `.venv` only and never touches `data\` or worktrees. No signed installer or MSI (single user, one PC).
+- Version 0.18.0 (0.17.0 is WP13), no migration. No real API, GitHub or Windows call was made.
