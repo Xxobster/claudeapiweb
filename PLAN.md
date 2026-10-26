@@ -120,7 +120,7 @@ Each WP lists: goal, key files, acceptance (testable), tests, model/effort, depe
 
 **WP15: Dashboard completion** (Sonnet medium). Global/project dashboards, Kanban + table, agent monitor, git/review center, settings, empty/loading/disconnected states, no fake data. Playwright tests across two projects in two tabs. Depends on WP10 (can begin earlier on finished APIs).
 
-**WP16: Hardening and release** (Opus xhigh security review, then Sonnet fixes). Full `tests/security` suite, e2e multi-project scenarios (all 20), docs set (README, ARCHITECTURE, SECURITY, API/SDK, USER_GUIDE, KNOWN_LIMITATIONS, TEST_REPORT), installers, shortcut. Depends on all.
+**WP16: Hardening and release** (DONE v0.18.0, 2026-10-26; remaining items need the PC: docs/KNOWN_LIMITATIONS.md) (Opus xhigh security review, then Sonnet fixes). Full `tests/security` suite, e2e multi-project scenarios (all 20), docs set (README, ARCHITECTURE, SECURITY, API/SDK, USER_GUIDE, KNOWN_LIMITATIONS, TEST_REPORT), installers, shortcut. Depends on all.
 
 Parallelisable pairs once WP4 exists: WP3 ‖ WP4; WP6 ‖ WP8 groundwork (ledger schema); WP13 ‖ WP14 after WP12; WP15 ‖ anything after the APIs exist (separate files, separate branches).
 

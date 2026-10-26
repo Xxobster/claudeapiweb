@@ -131,6 +131,9 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 - Unverified on the PC (the Nirandyr repo is not readable from here): the Blender path (`C:\Program Files\Blender Foundation\Blender 5.2\blender.exe`), the Blender script `tools/blender/export_asset.py` and its `--in/--out` options and report format, the generator's `--world` verify-only behaviour and golden locations, the map JSON layout (`tiles` grid, `0` = floor), the `Assets/Art/Generated/` and `Assets/Maps/golden/` paths, and that Unity's `-testResults` writes NUnit 3 XML. A wrong value makes the command refuse or the validator report an error; it never passes silently. Fix by editing the profile.
 - Not built: real Blender/Unity/zone_gen runs (need the PC; the first one goes through a small supervised task), device locks around Unity (`devlock`), `BLENDER_RUNNING.lock` location check (WP6 open item), a Play Mode lane, FBX poly counting (FBX is only header-checked; use the Blender report).
 
+## 2l. WP16 notes (hardening and release, v0.18.0)
+Adds tests and documents only; no product module changes, no migration. New: `tests/e2e/` (scenario matrix for the 20 required scenarios, two-project run, API doc freshness), `tests/security/test_hardening.py` (source tripwires, route-walking token/CSRF/Origin tests), `scripts/{install,make_shortcut,uninstall,gen_api_doc}`, `docs/{SECURITY,API,KNOWN_LIMITATIONS,TEST_REPORT}.md`, README. Consequence chains: adding an `/api` route changes `docs/API.md` (run `scripts/gen_api_doc.py`, or `test_api_doc` fails); renaming a scenario test breaks `test_scenario_matrix` (update the matrix and TEST_REPORT together); a new `.ps1` script is scanned for code download/evaluation. Findings: none new (see SECURITY.md, WP16 review). Residual: everything in KNOWN_LIMITATIONS section 1 needs the PC.
+
 ## 3. Open risks (see THREATS.md for the full list)
 High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Micah's decision). Process: subscription use of the SDK unverified (CLI mode stays a stub); Admin cost API availability unknown.
 
@@ -186,6 +189,7 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 - Open: the live 90 % checkpoint message is still WP10; the 3 s refresh of Agents pauses while a form field has focus.
 
 ## 4. Change log
+| 2026-10-26 | 0.18.0 | WP16: hardening and release: scenario matrix (1-20) + two-project e2e, hardening sweep tests (every `/api` route needs token and, for mutations, same-origin), install/shortcut/uninstall scripts, generated API reference, SECURITY, KNOWN_LIMITATIONS, TEST_REPORT, README; no product code, no migration | CPM Code thread (WP16) |
 | Date | Version | Change | By |
 |---|---|---|---|
 | 2026-10-26 | 0.15.1 | WP15d: lanes screen (project "Lanes" tab, lane box on task pages, lane checks in the gate history); UI + e2e + docs only, no migration (touches `web/*`) | CPM Code thread (WP15d) |
