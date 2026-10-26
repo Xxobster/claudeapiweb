@@ -258,9 +258,10 @@ const BOARD = ["BACKLOG", "READY", "BLOCKED", "RESERVED", "RUNNING", "TESTING", 
 async function projectView(id, tab) {
   const my = navToken;
   const [project, tasks] = await Promise.all([api.get(`/api/projects/${id}`), api.get(`/api/projects/${id}/tasks`)]);
-  const tabs = ["board", "table", "sources", "add"].map((t) => h("button", { class: tab === t ? "on" : "", onclick: () => route(`#/project/${id}/${t}`) }, { board: "Board", table: "Table", sources: "Sources & trust", add: "Add tasks" }[t]));
+  const tabs = ["board", "table", "lanes", "sources", "add"].map((t) => h("button", { class: tab === t ? "on" : "", onclick: () => route(`#/project/${id}/${t}`) }, { board: "Board", table: "Table", lanes: "Lanes", sources: "Sources & trust", add: "Add tasks" }[t]));
   let body;
   if (tab === "table") body = taskTable(tasks);
+  else if (tab === "lanes") body = await lanesPane(id, tasks);
   else if (tab === "sources") body = sourcesPane(project);
   else if (tab === "add") body = addPane(id);
   else body = board(tasks);
@@ -291,6 +292,68 @@ function taskTable(tasks) {
   return h("table", null,
     h("thead", null, h("tr", null, ["#", "Title", "Status", "Priority", "Mode", "Depends on", "Updated"].map((t) => h("th", null, t)))),
     h("tbody", null, tasks.map((t) => h("tr", null, h("td", null, t.id), h("td", null, link(`#/task/${t.id}`, t.title)), h("td", null, statusPill(t.status)), h("td", null, t.priority), h("td", null, t.billing_mode), h("td", null, t.depends_on.join(", ") || "—"), h("td", null, when(t.updated_at))))));
+}
+
+// ---------------------------------------------------------------- lanes (WP12 API, read-only)
+const bullets = (items, empty_) => (items.length ? h("ul", null, items.map((i) => h("li", null, i))) : h("span", { class: "muted" }, empty_));
+
+function laneCard(l, tasks) {
+  const mine = tasks.filter((t) => t.lane === l.id);
+  const cmdText = (c) => `${c.program}${c.prefix.length ? " " + c.prefix.join(" ") : ""}${Object.keys(c.flags).length ? " [" + Object.entries(c.flags).map(([f, k]) => (k === "none" ? f : `${f} <${k}>`)).join(" ") + "]" : ""}${c.positional !== "none" ? ` <${c.positional}>` : ""}`;
+  const a = l.artifacts;
+  return h("div", { class: "card lane", "data-lane": l.id },
+    h("div", { class: "row" }, h("h3", null, l.title || l.id), h("span", { class: "pill" }, l.id), h("span", { class: "pill" }, l.type),
+      h("span", { class: `pill ${l.enabled ? "ok" : "warn"}` }, l.enabled ? "enabled" : "disabled"),
+      h("span", { class: `pill ${l.problems.length ? "warn" : "ok"}` }, l.problems.length ? "not ready on this PC" : "ready"),
+      h("span", { class: "muted" }, `${mine.length} task${mine.length === 1 ? "" : "s"} · ${mine.filter((t) => ["RESERVED", "RUNNING", "TESTING", "REVIEWING", "CORRECTING"].includes(t.status)).length} active`)),
+    l.description ? h("p", { class: "muted" }, l.description) : null,
+    l.problems.length ? h("div", { class: "note warn" }, l.problems.map((p) => h("div", null, p))) : null,
+    h("h4", null, "Resources (reserved while a worker runs)"),
+    bullets(l.resources.map((r) => (r.name ? `${r.type}: ${r.name}` : r.type)), "none: not a heavy lane"),
+    h("h4", null, "Allowed commands (nothing else can run)"),
+    bullets(l.commands.map((c) => h("span", null, h("code", null, c.name), ` → ${cmdText(c)}`, c.needs_trust ? h("span", { class: "pill warn" }, "trusted workspace only") : null, c.description ? h("span", { class: "muted" }, ` — ${c.description}`) : null)), "none: file tools only"),
+    h("h4", null, "Validators (run by the gate)"),
+    bullets(l.validators.map((v) => h("span", null, h("code", null, v.kind), h("span", { class: `pill ${v.severity === "error" ? "bad" : "warn"}` }, v.severity), Object.keys(v.params).length ? h("span", { class: "muted" }, ` ${JSON.stringify(v.params)}`) : null)), "none"),
+    h("h4", null, "Artifacts and binaries"),
+    h("table", null, h("tbody", null,
+      h("tr", null, h("th", null, "Output folders"), h("td", null, a.asset_paths.join(", ") || "anywhere in the task's declared scope")),
+      h("tr", null, h("th", null, "Allowed extensions"), h("td", null, a.extensions.join(" ") || "any")),
+      h("tr", null, h("th", null, "Binary extensions"), h("td", null, a.binary_extensions.join(" ") || "none")),
+      h("tr", null, h("th", null, "Largest file"), h("td", null, kb(a.max_file_bytes))),
+      h("tr", null, h("th", null, "Binary policy"), h("td", null, { ask: "stop and ask a person for each binary", lfs_only: "only when Git LFS tracks it", deny: "never" }[a.binary_policy] || a.binary_policy)))),
+    h("h4", null, "Report format"),
+    h("p", null, l.report.required_sections.length ? `The final answer must contain: ${l.report.required_sections.join(", ")}` : "Free form", h("span", { class: "muted" }, ` (at most ${l.report.max_chars} characters)`)),
+    Object.keys(l.required.tools).length + Object.keys(l.required.paths).length ? h("details", null, h("summary", null, "Required tools and paths"), bullets([...Object.entries(l.required.tools), ...Object.entries(l.required.paths)].map(([k, v]) => `${k}: ${v}`), "")) : null);
+}
+
+async function lanesPane(projectId, tasks) {
+  let res;
+  try { res = await api.get(`/api/projects/${projectId}/lanes`); } catch (e) { return errBox(e); }
+  if (!res.lanes.length) return empty("This project's profile declares no lane. Lanes are defined in profiles/<project>.yaml.");
+  return h("div", null,
+    h("p", { class: "muted" }, "What each lane lets a worker do. The profile is the only place a lane is changed; this page only shows it. Every rule here is checked by CPM, not left to the worker."),
+    res.lanes.map((l) => laneCard(l, tasks)));
+}
+
+function laneCheckSummary(lc) {
+  return h("div", null, h("strong", null, "Lane checks: "), h("span", { class: `pill ${lc.status === "passed" ? "ok" : lc.status === "failed" ? "bad" : "warn"}` }, lc.status),
+    lc.unavailable ? h("div", { class: "warn" }, lc.unavailable) : null,
+    lc.findings && lc.findings.length ? h("ul", null, lc.findings.map((f) => h("li", { class: f.severity === "error" ? "bad" : "warn" }, `${f.severity} · ${f.message}`, f.path ? h("span", { class: "muted" }, ` (${f.path})`) : null))) : null,
+    lc.decisions && lc.decisions.length ? h("div", null, "Binary files waiting for your decision: ", h("ul", null, lc.decisions.map((d) => h("li", null, d)))) : null);
+}
+
+async function taskLaneBox(task) {
+  if (!task.lane) return null;
+  let l = null;
+  try { l = (await api.get(`/api/projects/${task.project_id}/lanes`)).lanes.find((x) => x.id === task.lane); } catch { /* shown below */ }
+  if (!l) return h("div", { class: "card", id: "task-lane" }, h("strong", null, "Lane "), h("code", null, task.lane), h("div", { class: "note warn" }, "This lane is not defined by the project's profile any more: the gate and the scheduler will refuse the task."));
+  return h("div", { class: "card", id: "task-lane" },
+    h("div", { class: "row" }, h("strong", null, "Lane"), link(`#/project/${task.project_id}/lanes`, l.title || l.id),
+      h("span", { class: `pill ${l.enabled ? "ok" : "warn"}` }, l.enabled ? "enabled" : "disabled"),
+      h("span", { class: `pill ${l.problems.length ? "warn" : "ok"}` }, l.problems.length ? "not ready on this PC" : "ready"),
+      l.resources.length ? h("span", { class: "muted" }, `needs ${l.resources.map((r) => r.name || r.type).join(", ")}`) : null),
+    l.problems.length ? h("div", { class: "note warn" }, l.problems.map((p) => h("div", null, p))) : null,
+    h("div", { class: "muted" }, `Report sections: ${l.report.required_sections.join(", ") || "free form"} · binaries: ${l.artifacts.binary_policy} · ${l.validators.length} validator${l.validators.length === 1 ? "" : "s"}`));
 }
 
 function sourcesPane(project) {
@@ -370,12 +433,14 @@ async function taskView(id) {
   }
 
   const reviewBox = (await reviewPane(task, () => route())) || null;
+  const laneBox = await taskLaneBox(task);
   const logBox = h("pre", { class: "log", id: "run-log", "aria-label": "Live worker log" }, latest ? "" : "No run yet.");
   const streamState = h("span", { class: "pill" }, latest ? "…" : "idle");
   show(my, h("h1", null, task.title), h("div", { class: "muted" }, link(`#/project/${task.project_id}/board`, project.name)),
     h("div", { class: "row" }, statusPill(task.status), `priority ${task.priority} · ${task.billing_mode} · model ${task.model || "default"} · retries ${task.retry_count}`),
     task.block_reason ? h("div", { class: "note warn" }, `Blocked: ${task.block_reason}`) : null,
     trustNote(project),
+    laneBox,
     task.status === "PAUSED_BUDGET" ? budgetActions(task, tb.remaining_microusd, () => route()) : null,
     h("div", { class: "card", id: "task-budget" }, h("strong", null, "Budget "), `spent ${usd(tb.spent_microusd)}`, tb.cap_microusd != null ? ` of ${usd(tb.cap_microusd)} (left ${usd(tb.remaining_microusd)})` : " (no task cap)", h("span", { class: "muted" }, ` · ${tb.label}`)),
     why ? conflictsBox(why, () => route(), id) : null,
@@ -540,6 +605,7 @@ function gateSummary(r) {
       h("ul", null, sm.review.criteria.map((c) => h("li", { class: c.met ? "ok" : "bad" }, `${c.met ? "met" : "NOT met"}: ${c.text}`, c.note ? h("span", { class: "muted" }, ` — ${c.note}`) : null))),
       sm.review.issues && sm.review.issues.length ? h("ul", null, sm.review.issues.map((i) => h("li", { class: i.severity === "blocker" ? "bad" : "warn" }, `${i.severity} · ${i.category}: ${i.text}`))) : null));
   } else if (sm.review && sm.review.reason) out.push(h("div", { class: "warn" }, sm.review.reason));
+  if (sm.lane) out.push(laneCheckSummary(sm.lane));
   if (sm.gave_up) out.push(h("div", { class: "bad" }, `Stopped: ${sm.gave_up}`));
   if (sm.correction) out.push(h("div", { class: "muted" }, `Sent back to a worker: correction ${sm.correction.attempt} of ${sm.correction.of}.`));
   return out;

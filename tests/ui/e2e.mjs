@@ -162,6 +162,31 @@ try {
   await a.click("text=Turn off automatic retry for API tasks");
   await a.waitForSelector("text=Turn on automatic retry for API tasks");
 
+  // 6e2. Lanes screen (WP12 API): the project tab and the lane box on a task page. The API answer is stubbed in the
+  // browser (profiles/ has no lane for the throwaway project); the real endpoint is covered by tests/lanes.
+  const laneBody = { lanes: [{ id: "voice", type: "voice", title: "Voice lines", description: "d", enabled: true, resources: [{ type: "gpu", name: null }],
+    commands: [{ name: "tts", program: "tts.exe", prefix: [], flags: { "--out": "out_path" }, positional: "none", needs_trust: false, description: "speak" }],
+    validators: [{ kind: "files_exist", params: { glob: "a/*.wav" }, severity: "error" }],
+    artifacts: { asset_paths: ["assets/voice/"], extensions: [".wav"], binary_extensions: [".wav"], max_file_bytes: 5000000, binary_policy: "ask" },
+    report: { required_sections: ["Summary"], max_chars: 20000 }, task_template: {}, required: { tools: {}, paths: {} }, problems: ["required tool 'tts' not found at C:\\x"] }] };
+  await a.route(`**/api/projects/${alphaId}/lanes`, (r) => r.fulfill({ json: laneBody }));
+  await a.goto(`${base}/#/project/${alphaId}/lanes`);
+  await a.waitForSelector("[data-lane='voice'] >> text=Allowed commands");
+  await a.waitForSelector("[data-lane='voice'] >> text=not ready on this PC");
+  await a.waitForSelector("[data-lane='voice'] >> text=stop and ask a person for each binary");
+  await a.waitForSelector("[data-lane='voice'] >> text=The final answer must contain: Summary");
+  const lt = await post(`/api/projects/${alphaId}/tasks`, { title: "no lane task", billing_mode: "mock" });
+  await a.goto(`${base}/#/task/${lt.id}`);
+  await a.waitForSelector("text=No description.");
+  assert.equal(await a.locator("#task-lane").count(), 0, "a task without a lane has no lane box");
+  await a.route(`**/api/tasks/${lt.id}`, async (r) => { const real = await (await r.fetch()).json(); await r.fulfill({ json: { ...real, lane: "voice" } }); });
+  await a.goto(`${base}/#/projects`);
+  await a.goto(`${base}/#/task/${lt.id}`);
+  await a.waitForSelector("#task-lane >> text=Voice lines");
+  await a.waitForSelector("#task-lane >> text=not ready on this PC");
+  await a.unroute(`**/api/tasks/${lt.id}`);
+  await a.unroute(`**/api/projects/${alphaId}/lanes`);
+
   // 6f. Review (WP10): a finished mock task is judged by the gate, its diff is shown, publishing without a remote is refused.
   const rv = await post(`/api/projects/${alphaId}/tasks`, { title: "review me", billing_mode: "mock", acceptance: ["the output file exists"] });
   await post(`/api/tasks/${rv.id}/transition`, { to: "READY" });
