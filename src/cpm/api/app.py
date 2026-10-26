@@ -13,10 +13,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from cpm import __version__
-from cpm.api import credentials, projects, runs, tasks, wizard
+from cpm.api import credentials, locks, projects, runs, tasks, wizard
 from cpm.config import Settings, load_settings
 from cpm.db.engine import make_engine
 from cpm.db.migrate import upgrade
+from cpm.locks.admission import Admission
+from cpm.locks.reservations import ReservationService
 from cpm.logging_setup import configure_logging
 from cpm.providers.keycheck import HttpKeyValidator, KeyValidator, MockKeyValidator
 from cpm.security.childenv import inherited_credential_vars
@@ -66,6 +68,10 @@ def create_app(
     app.state.key_validator = key_validator or MockKeyValidator()
     app.state.live_validator = HttpKeyValidator()
     app.state.supervisor = RunSupervisor(engine, settings, app.state.secrets)
+    app.state.reservations = ReservationService(
+        engine, liveness=lambda task_id: app.state.supervisor.live_run_for_task(task_id) is not None
+    )
+    app.state.admission = Admission(engine, app.state.reservations)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_req: Request, exc: RequestValidationError) -> JSONResponse:
@@ -78,6 +84,7 @@ def create_app(
     app.include_router(projects.router)
     app.include_router(tasks.router)
     app.include_router(runs.router)
+    app.include_router(locks.router)
 
     @app.get("/api/session")
     def session() -> dict[str, str]:

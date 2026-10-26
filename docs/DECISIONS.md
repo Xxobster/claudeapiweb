@@ -61,3 +61,15 @@
 - Workers get no auto-approved tools: every file and Bash call goes through `workers/permissions.py`. Bash = one simple allowlisted command (git read/add/commit, `ls`, `pwd`, and in a trusted workspace `python -m pytest|ruff|mypy`). Lanes (WP12) will add their own allowlists.
 - Worktree base is `origin/main` when it exists, otherwise HEAD. Content filters (LFS) are blanked for checkout, so LFS files appear as pointers until WP12 decides the binary policy.
 - WebSocket progress is a 0.2 s tail of the JSONL file, so reconnecting with `since=<seq>` replays exactly.
+
+## 2026-10-26 (WP6) — implementation choices (awaiting Micah only if he disagrees)
+- Reservations: one row per (task, resource). A task's set is granted atomically or not at all, and re-acquiring replaces it. Paths: exclusive/shared, prefix overlap, per project. Named machine-wide resources: `unity_editor`, `gpu`, `blender`, `device:<serial>`, `build`, `test_env`, `custom`; `git_branch:<name>` is per project.
+- Max 1 heavy task is enforced twice: by the implicit `class:heavy` exclusive reservation (atomic) and by the scheduler (WP7). Heavy types come from the profile (`heavy_resources`).
+- Lease 120 s by default (max 3600); a lapsed lease is removed only when the holder is not alive, otherwise it is renewed.
+- Task `declared_scope` stays a list of plain project-relative paths (a trailing `/`, `/*` or `/**` means a folder). Lane/machine resources are passed by the scheduler or lane (`extra`), not typed by the user.
+- Desktop claims block exclusive requests only, never stop a running worker, and live in CPM's database (the job board in the managed repo stays read-only, rule 40 / Q6).
+- External locks (Nirandyr rules 13, 24, 26, 27): `BUILD_RUNNING.lock`, `BLENDER_RUNNING.lock` and any `*.lock` in `D:\projects\gpu-locks` block heavy tasks (the voice job uses gpu_lock.sh, so it is covered by the folder); job-board rows block overlapping exclusive paths; devlock files are listed for display and device commands must go through `devlock.py run` (CPM builds the argv, never runs the repo script itself).
+- Open for the PC (Micah, no hurry, safe default applies): confirm where `BLENDER_RUNNING.lock` and any separate voice lock really live (assumed `D:\projects\game-build\BLENDER_RUNNING.lock`; voice assumed covered by gpu-locks), and show one real `docs/JOB_BOARD.md` so the parser can be checked against it. The parser fails closed (unknown status = claimed).
+- External edits are found by polling git (HEAD + status snapshot), not by a filesystem watcher: no dependency, same result for the purposes of scenario 7.
+- Version 0.6.0, migration 0003.
+

@@ -21,7 +21,7 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["db_revision"] == "0002"
+    assert body["db_revision"] == "0003"
 
 
 def test_migrations_up_down(tmp_path):
@@ -106,3 +106,28 @@ def test_upgrade_0002_keeps_referencing_rows(tmp_path):
         assert q("SELECT task_id FROM events") == 1
         assert q("SELECT status FROM tasks WHERE id=1") == "BACKLOG"
         assert q("PRAGMA foreign_keys") == 1
+
+
+def test_migration_0003_matches_models_and_downgrades(tmp_path):
+    from alembic.autogenerate import compare_metadata
+    from alembic.runtime.migration import MigrationContext
+
+    from cpm.db.migrate import downgrade
+    from cpm.db.models import Base
+
+    db = tmp_path / "m.db"
+    url = f"sqlite:///{db.as_posix()}"
+    upgrade(url)
+    engine = make_engine(db)
+    with engine.connect() as c:
+        diff = compare_metadata(MigrationContext.configure(c), Base.metadata)
+    names = {d[0] for d in diff}
+    assert not names & {"add_table", "remove_table", "add_column", "remove_column"}, diff
+    downgrade(url, "0002")
+    with engine.connect() as c:
+        assert not c.exec_driver_sql(
+            "SELECT 1 FROM sqlite_master WHERE name='desktop_claims'"
+        ).fetchall()
+        cols = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(reservations)")}
+    assert "project_id" not in cols and "label" not in cols
+    upgrade(url)
