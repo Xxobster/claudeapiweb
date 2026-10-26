@@ -224,7 +224,9 @@ def commit_tree_probe(worktree: Path, snap: Snapshot) -> str:
 
     `commit-tree` only writes an object: no ref, index or working tree changes.
     """
-    return _g(worktree, "commit-tree", snap.tree, "-p", snap.head, "-m", "cpm probe", config=_IDENT).strip()
+    return _g(
+        worktree, "commit-tree", snap.tree, "-p", snap.head, "-m", "cpm probe", config=_IDENT
+    ).strip()
 
 
 def merge_conflicts(worktree: Path, base_tip: str, commit: str) -> list[str]:
