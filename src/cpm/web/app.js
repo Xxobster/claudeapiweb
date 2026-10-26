@@ -757,8 +757,8 @@ async function settingsView() {
   const key = h("input", { id: "s-key", type: "password", autocomplete: "off", size: 50, placeholder: cred.configured ? "saved — type to replace" : "sk-ant-…" });
   const f = (id, v, extra) => h("input", { id, value: v ?? "", ...extra });
   const name = f("w-name", cfg.default_project_name); const dir = f("w-dir", cfg.project_dir, { size: 50 });
-  const git = f("w-git", cfg.git_url); const gb = f("w-global", cfg.global_budget_usd, { type: "number", step: "0.01", min: "0.01" });
-  const pb = f("w-proj", cfg.project_budget_usd, { type: "number", step: "0.01", min: "0" }); const tb = f("w-task", cfg.task_budget_usd, { type: "number", step: "0.01", min: "0" });
+  const git = f("w-git", cfg.git_url); const gb = f("w-global", cfg.global_budget_usd, { type: "number", step: "0.01", min: "0.01", required: true });
+  const pb = f("w-proj", cfg.project_budget_usd, { type: "number", step: "0.01", min: "0", required: true, placeholder: "e.g. 50" }); const tb = f("w-task", cfg.task_budget_usd, { type: "number", step: "0.01", min: "0", required: true, placeholder: "e.g. 5" });
   const par = f("w-par", cfg.max_parallel_agents ?? 3, { type: "number", min: "1", max: "8" });
   const model = h("select", { id: "w-model" }, wiz.models.map((m) => h("option", { value: m, selected: m === (cfg.default_model || "claude-sonnet-5-5") }, m)));
   const effort = h("select", { id: "w-effort" }, ["low", "medium", "high", "xhigh", "max"].map((m) => h("option", { value: m, selected: m === (cfg.default_effort || "high") }, m)));
@@ -778,7 +778,7 @@ async function settingsView() {
     } },
       h("h2", null, wiz.completed ? "Setup" : "First-run setup"),
       field("Default project name", name), field("Project folder", dir), field("Git remote (optional)", git),
-      field("Monthly cap, global (USD, required)", gb), field("Cap per project (USD)", pb), field("Cap per task (USD)", tb),
+      field("Monthly cap, global (USD, required)", gb), field("Cap per project (USD, required, at most the monthly cap)", pb), field("Cap per task (USD, required, at most the project cap)", tb),
       field("Parallel agents (1–8)", par), field("Default model", model), field("Default effort", effort),
       h("p", null, h("button", { class: "primary", type: "submit" }, "Save setup"))));
 }
