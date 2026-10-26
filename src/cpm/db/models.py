@@ -219,6 +219,26 @@ class Integration(Base):
     )
 
 
+class JobBoardClaim(Base):
+    """Docs-only pull request that adds (claim) or releases a row on the project's job board."""
+
+    __tablename__ = "job_board_claims"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    action: Mapped[str] = mapped_column(String(8))  # claim | release
+    board_path: Mapped[str] = mapped_column(Text)
+    branch: Mapped[str] = mapped_column(String(200))
+    head_sha: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(16), default="committed")  # committed|pushed|pr_open
+    pr_number: Mapped[int | None] = mapped_column(Integer)
+    pr_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    __table_args__ = (UniqueConstraint("task_id", "action"),)
+
+
 class UsageEvent(Base):
     """Append-only cost ledger. `dedup_key` = SDK message id, so one message is counted once."""
 

@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.13.0)
+# USER_GUIDE (v0.14.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -93,6 +93,11 @@ When a worker finishes, its task waits in **TESTING**. The **acceptance gate** t
 - Task page, section **Review**: the changed files (with "expected" or the reason a file is unexpected), the diff per file or whole, every gate result with tests, review and findings, and the **Publish** box. Viewing never changes the task's files.
 - **Publish** (COMPLETED tasks): save a fine-grained GitHub token first (Git & review page; needs contents and pull requests write on the project repository). The button commits exactly what the gate checked, pushes the `claude/...` branch (never main, never forced) and opens a pull request that lists files changed, tests, security findings, exploit findings and what still needs the PC (the text you type). CPM never merges: merge it on GitHub. A failed attempt can be retried; nothing is pushed twice.
 - API: `GET /api/tasks/{id}/review|changes|diff`, `POST /api/tasks/{id}/gate|gate/approve|integrate`, `GET/PUT /api/gate/config`, `PUT/DELETE /api/credentials/github`. The gate runs by itself on every unpaused scheduler pass (turn off with `auto` in the gate settings).
+
+## Job board claims (v0.14.0)
+Nirandyr rule 40: other threads must see which files a job holds. On a task's page, the **Job board** box opens a docs-only pull request that adds one row (task, `cpm` as owner, the task's declared scope, `claimed`) to the project's `docs/JOB_BOARD.md`; merge it on GitHub to make the claim visible. When the work is finished, **Release the claim** opens a second pull request that marks the row `released` (it needs the claim PR to be merged first). Nothing is claimed or released automatically, and CPM never merges.
+- Needs: a saved GitHub token (Git & review page), a project with a profile that names a job board (Nirandyr does), an `origin` remote on github.com and an up-to-date `origin/main` in your clone (fetch it in your own tree; CPM does not). CPM refuses when the board has no table with files / status / job columns, when the scope overlaps another owner's active claim, or when the task has no declared scope.
+- API: `GET /api/tasks/{id}/job-board`, `POST /api/tasks/{id}/job-board/claim|release`.
 
 ## Restart and backups (v0.12.0)
 - When CPM starts it first copies the database to `data\backups\` (the newest 10 are kept), then checks for work that was interrupted by a stop or crash. Interrupted tasks are marked **FAILED** (or **PAUSED** if they were in the middle of a commit: check the task's worktree, then resume or retry yourself). Locks and budget holds of those tasks are freed. Nothing is started or completed by this check.

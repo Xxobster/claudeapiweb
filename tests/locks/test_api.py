@@ -71,3 +71,20 @@ def test_external_scan_and_locks_endpoints(client, auth, tmp_path):
         "locks": []
     }  # no profile
     assert client.post("/api/projects/999/external-scan", headers=auth).status_code == 404
+
+
+def test_job_board_routes_need_a_profile_and_never_leak(client, auth, tmp_path):
+    pid, _ = _project(client, tmp_path, auth)
+    t = client.post(
+        f"/api/projects/{pid}/tasks", json={"title": "ui", "declared_scope": ["Assets/UI/"]},
+        headers=auth,
+    ).json()["id"]  # fmt: skip
+    st = client.get(f"/api/tasks/{t}/job-board", headers=auth)
+    assert st.status_code == 200 and st.json()["claim"] is None and st.json()["problem"]
+    for action in ("claim", "release"):
+        r = client.post(f"/api/tasks/{t}/job-board/{action}", headers=auth)
+        assert r.status_code == 409, r.text
+    assert client.get("/api/tasks/9999/job-board", headers=auth).status_code == 404
+    # token and CSRF are required like everywhere else
+    assert client.get(f"/api/tasks/{t}/job-board").status_code in (401, 403)
+    assert client.post(f"/api/tasks/{t}/job-board/claim").status_code in (401, 403)

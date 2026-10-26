@@ -3,7 +3,8 @@
 A claim blocks every exclusive path reservation that overlaps it (see `ReservationService`).
 Adding a claim never stops a running worker: the claim is returned together with the tasks that
 already hold overlapping paths, so the UI can warn and the user can pause them. Claims live in
-CPM's database only; the job board in a managed repo is never written (WP11, rule 40).
+CPM's database only; the managed repo's job board is written only through the docs-only pull
+requests of `locks.boardpr` (WP11, rule 40), never in place.
 """
 
 from __future__ import annotations

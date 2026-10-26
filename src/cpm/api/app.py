@@ -33,6 +33,7 @@ from cpm.config import Settings, load_settings
 from cpm.db.engine import make_engine
 from cpm.db.migrate import upgrade
 from cpm.locks.admission import Admission
+from cpm.locks.boardpr import JobBoardService
 from cpm.locks.external import ExternalWatcher
 from cpm.locks.reservations import ReservationService
 from cpm.logging_setup import configure_logging
@@ -124,6 +125,7 @@ def create_app(
     app.state.integration = IntegrationService(
         engine, app.state.supervisor.worktrees, app.state.secrets
     )
+    app.state.jobboard = JobBoardService(engine, app.state.supervisor.worktrees, app.state.secrets)
     app.state.scheduler = Scheduler(
         engine, app.state.supervisor, app.state.admission, app.state.reservations,
         ExternalWatcher(engine), gate=app.state.gate,

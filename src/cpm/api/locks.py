@@ -15,8 +15,10 @@ from sqlalchemy.orm import Session
 
 from cpm.db.models import Project, Task
 from cpm.locks.admission import Admission, adapters_for, profile_for
+from cpm.locks.boardpr import JobBoardService
 from cpm.locks.claims import ClaimError, DesktopClaims
 from cpm.locks.external import ExternalWatcher
+from cpm.tasks.service import TaskError
 
 router = APIRouter(prefix="/api", tags=["locks"])
 
@@ -129,3 +131,33 @@ def external_scan(project_id: int, request: Request) -> dict[str, Any]:
         "truncated": res.truncated,
         "conflicts": [asdict(c) for c in res.conflicts],
     }
+
+
+# ------------------------------------------------------------------ job board PRs (WP11)
+def _board(request: Request) -> JobBoardService:
+    return request.app.state.jobboard  # type: ignore[no-any-return]
+
+
+def _board_call(fn: Any, *a: Any) -> Any:
+    try:
+        return fn(*a)
+    except TaskError as e:  # BoardPrError, NotFound
+        raise HTTPException(e.status, str(e)) from e
+
+
+@router.get("/tasks/{task_id}/job-board")
+def job_board_status(task_id: int, request: Request) -> dict[str, Any]:
+    """CPM's claim / release pull requests for the task and what the base branch's board shows."""
+    return _board_call(_board(request).status, task_id)  # type: ignore[no-any-return]
+
+
+@router.post("/tasks/{task_id}/job-board/claim")
+def job_board_claim(task_id: int, request: Request) -> dict[str, Any]:
+    """Open a docs-only PR that adds the task's declared scope to the project's job board."""
+    return _board_call(_board(request).claim, task_id).as_dict()  # type: ignore[no-any-return]
+
+
+@router.post("/tasks/{task_id}/job-board/release")
+def job_board_release(task_id: int, request: Request) -> dict[str, Any]:
+    """Open a docs-only PR that marks the task's job board row as released."""
+    return _board_call(_board(request).release, task_id).as_dict()  # type: ignore[no-any-return]
