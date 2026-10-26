@@ -5,6 +5,7 @@ from cpm.config import Settings
 from cpm.db.engine import make_engine
 from cpm.db.migrate import upgrade
 from cpm.db.models import Project
+from cpm.db.settings_repo import set_setting
 from cpm.security.secrets_store import MemorySecretStore
 from cpm.tasks.service import TaskService
 from cpm.workers.supervisor import RunSupervisor
@@ -27,6 +28,7 @@ def env(tmp_path):
         s.add(p)
         s.commit()
         pid = p.id
+    set_setting(engine, "approved_roots", [str(repo)])
     store = MemorySecretStore()
     sup = RunSupervisor(engine, settings, store)
     tasks = TaskService(engine)
