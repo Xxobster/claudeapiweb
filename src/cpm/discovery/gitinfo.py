@@ -47,8 +47,8 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _git(root: Path, *args: str) -> str:
-    cmd = ["git", *_HARDEN, "-C", str(root), *args]
+def _git(root: Path, *args: str, config: tuple[str, ...] = ()) -> str:
+    cmd = ["git", *_HARDEN, *config, "-C", str(root), *args]
     try:
         done = subprocess.run(  # noqa: S603
             cmd, capture_output=True, text=True, timeout=TIMEOUT_S, env=_env(), check=False
@@ -124,6 +124,23 @@ def read_remotes(root: Path) -> dict[str, str]:
     return out
 
 
+def _filter_overrides(root: Path) -> tuple[str, ...]:
+    """`-c` arguments that blank every repo-defined content filter command.
+
+    `git status` runs `filter.<name>.clean|smudge|process` to compare files, and those commands come
+    from the (untrusted) repo config. An empty command is ignored by git.
+    """
+    try:
+        listing = _git(root, "config", "--local", "--name-only", "--get-regexp", r"^filter\.")
+    except GitUnavailableError:
+        return ()  # no filter.* keys (git exits 1) or unreadable config
+    out: list[str] = []
+    for key in listing.splitlines():
+        if key.rsplit(".", 1)[-1].lower() in ("clean", "smudge", "process"):
+            out += ["-c", f"{key}="]
+    return tuple(out)
+
+
 def inspect(root: Path) -> GitInfo:
     if not is_repo_root(root):
         return GitInfo(is_repo=False)
@@ -134,7 +151,17 @@ def inspect(root: Path) -> GitInfo:
         info.head = None  # fresh repository without commits
     try:
         info.branch = _git(root, "symbolic-ref", "--short", "-q", "HEAD").strip() or None
-        status = _git(root, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+    except GitUnavailableError:
+        info.branch = None  # detached HEAD (tag or commit checkout)
+    try:
+        status = _git(
+            root,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=normal",
+            config=_filter_overrides(root),
+        )
         entries = [e for e in status.split("\0") if e]
         info.dirty_count = len(entries)
         info.dirty_sample = [e[3:] for e in entries[:20]]

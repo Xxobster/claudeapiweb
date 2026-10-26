@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from cpm.db.models import Event, Project, ProjectSource
+from cpm.db.models import Event, Project, ProjectSource, Setting
 from cpm.db.settings_repo import get_setting, set_setting
 from cpm.discovery import gitinfo, scan
 from cpm.discovery.commands import detect_commands, detect_unity
@@ -249,7 +249,8 @@ def add_project(body: ProjectIn, request: Request) -> dict[str, Any]:
         slug = base
         while slug in taken:
             n += 1
-            slug = f"{base}-{n}"[:64]
+            suffix = f"-{n}"
+            slug = base[: 64 - len(suffix)] + suffix
         project = Project(
             slug=slug,
             name=body.name,
@@ -363,4 +364,8 @@ def remove_project(project_id: int, request: Request) -> None:
             raise HTTPException(404, "unknown project")
         _event(s, None, "project.removed", slug=p.slug)
         s.delete(p)
+        # ids can be reused by SQLite; stale per-project settings must not leak to the next one
+        stale = s.get(Setting, f"project.{project_id}.patterns")
+        if stale is not None:
+            s.delete(stale)
         s.commit()

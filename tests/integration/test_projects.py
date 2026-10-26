@@ -200,3 +200,50 @@ def test_remove_only_unregisters(client, auth, tmp_path):
         f"/api/projects/{p['id']}", headers=auth
     ).status_code == 404
     assert client.get("/api/projects", headers=auth).json()["projects"] == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX shell command as the payload")
+def test_hostile_content_filter_does_not_execute(client, auth, tmp_path):
+    repo = make_repo(tmp_path / "filt", remote=None)
+    marker = tmp_path / "filter-pwned"
+    write(repo, ".gitattributes", "data.txt filter=evil\n")
+    write(repo, "data.txt", "aaaa\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "data")
+    git(repo, "config", "filter.evil.clean", f"touch {marker}; cat")
+    write(repo, "data.txt", "bbbb\n")  # same size, so git must run the filter to compare
+    r = add(client, auth, repo)
+    assert r.status_code == 201 and r.json()["git"]["is_repo"]
+    assert not marker.exists()
+
+
+def test_detached_head_still_reports_status(client, auth, tmp_path):
+    repo = make_repo(tmp_path / "det", remote="https://github.com/example/det")
+    git(repo, "checkout", "-q", "--detach")
+    write(repo, "dirty.txt")
+    g = add(client, auth, repo).json()["git"]
+    assert g["branch"] is None and g["dirty_count"] == 1 and g["remotes"] and g["branches"]
+
+
+def test_long_name_slug_collision_terminates(client, auth, tmp_path):
+    name = "a" * 80
+    for i in range(3):
+        r = add(client, auth, make_repo(tmp_path / f"l{i}", remote=None), name=name)
+        assert r.status_code == 201 and len(r.json()["slug"]) <= 64
+    assert r.json()["slug"].endswith("-3")
+
+
+def test_unregister_drops_custom_patterns(client, auth, tmp_path):
+    a = make_repo(tmp_path / "pa", remote=None)
+    write(a, "notes/x.md")
+    p = add(client, auth, a).json()
+    client.post(
+        f"/api/projects/{p['id']}/patterns",
+        json={"pattern": "notes/*.md", "kind": "task"},
+        headers=auth,
+    )
+    client.delete(f"/api/projects/{p['id']}", headers=auth)
+    b = make_repo(tmp_path / "pb", remote=None)
+    write(b, "notes/y.md")
+    q = add(client, auth, b).json()
+    assert "notes/y.md" not in {s["rel_path"] for s in q["sources"]}
