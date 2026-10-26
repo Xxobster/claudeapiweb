@@ -64,6 +64,7 @@ class TickReport:
     promoted: list[int] = field(default_factory=list)
     released: list[int] = field(default_factory=list)
     demoted: list[int] = field(default_factory=list)
+    gated: list[int] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -71,7 +72,8 @@ class TickReport:
             "at": self.at, "paused": self.paused, "started": self.started,
             "skipped": {str(k): v for k, v in self.skipped.items()},
             "retried": self.retried, "gave_up": self.gave_up, "promoted": self.promoted,
-            "released": self.released, "demoted": self.demoted, "errors": self.errors,
+            "released": self.released, "demoted": self.demoted, "gated": self.gated,
+            "errors": self.errors,
         }  # fmt: skip
 
 
@@ -94,6 +96,7 @@ class Scheduler:
         reservations: ReservationService,
         watcher: ExternalWatcher | None = None,
         *,
+        gate: Any | None = None,
         resources_for: ResourcesFor | None = None,
         start_args_for: StartArgsFor | None = None,
         clock: Callable[[], datetime] = utcnow,
@@ -105,6 +108,7 @@ class Scheduler:
         self.reservations = reservations
         self.watcher = watcher or ExternalWatcher(engine)
         self.tasks = TaskService(engine)
+        self.gate = gate  # cpm.review.gate.GateService: judges tasks that reached TESTING (WP10)
         self.resources_for = resources_for or (lambda _t: ())  # WP12 lanes add their resources
         self.start_args_for = start_args_for or (lambda _t: {})
         self.clock = clock
@@ -291,6 +295,12 @@ class Scheduler:
                 except Exception as exc:  # one failing step must not stop the others
                     log.exception("scheduler step %s failed", step.__name__)
                     report.errors.append(f"{step.__name__}: {redact(str(exc))[:200]}")
+            if not report.paused and self.gate is not None:
+                try:  # a gate may start a correction run, so a paused scheduler holds it back
+                    report.gated = self.gate.auto_run_pending()
+                except Exception as exc:
+                    log.exception("scheduler gate step failed")
+                    report.errors.append(f"gate: {redact(str(exc))[:200]}")
             if not report.paused:
                 try:
                     self._dispatch(cfg, report)

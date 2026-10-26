@@ -183,6 +183,42 @@ class DesktopClaim(Base):
     __table_args__ = (Index("ix_desktop_claims_project", "project_id", "released_at"),)
 
 
+class GateResult(Base):
+    """One acceptance-gate evaluation of a task (WP10). Append-only audit evidence."""
+
+    __tablename__ = "gate_results"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    # passed | tests_failed | review_rejected | unexpected_files | criteria_missing | no_changes
+    # | needs_trust | conflict | error
+    outcome: Mapped[str] = mapped_column(String(24))
+    action: Mapped[str] = mapped_column(String(16))  # completed | correction | failed | waiting
+    head_sha: Mapped[str | None] = mapped_column(String(64))
+    base_sha: Mapped[str | None] = mapped_column(String(64))
+    fingerprint: Mapped[str] = mapped_column(String(64), default="")  # identical-failure detection
+    summary_json: Mapped[str] = mapped_column(Text, default="{}")  # redacted, size-capped
+    created_at: Mapped[datetime] = _ts()
+    __table_args__ = (Index("ix_gate_results_task", "task_id", "id"),)
+
+
+class Integration(Base):
+    """Branch push and pull request of a COMPLETED task (pr_only mode, WP10)."""
+
+    __tablename__ = "integrations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), unique=True)
+    gate_id: Mapped[int] = mapped_column(ForeignKey("gate_results.id", ondelete="CASCADE"))
+    branch: Mapped[str] = mapped_column(String(200))
+    head_sha: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(16), default="committed")  # committed|pushed|pr_open
+    pr_number: Mapped[int | None] = mapped_column(Integer)
+    pr_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _ts()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 class UsageEvent(Base):
     """Append-only cost ledger. `dedup_key` = SDK message id, so one message is counted once."""
 

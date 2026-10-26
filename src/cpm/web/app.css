@@ -37,5 +37,8 @@ pre.log{background:#0b0e14;color:#d6deeb;padding:.6rem;border-radius:6px;max-hei
 .meter{position:relative;height:.8rem;border:1px solid var(--line);border-radius:999px;background:var(--bg);overflow:hidden;margin:.5rem 0}
 .meter .fill{height:100%;background:var(--ok)}.meter.mid .fill{background:var(--warn)}.meter.high .fill{background:var(--warn)}.meter.bad .fill{background:var(--bad)}
 .meter .mark{position:absolute;top:0;bottom:0;width:1px;background:var(--muted)}
+pre.diff{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:.4rem 0;max-height:480px;overflow:auto;font-size:.8rem;margin:.5rem 0}
+pre.diff div{padding:0 .6rem;white-space:pre-wrap;word-break:break-word}
+pre.diff .da{background:rgba(26,127,75,.15)}pre.diff .dd{background:rgba(180,35,24,.15)}pre.diff .dk{color:var(--accent)}pre.diff .dh{color:var(--muted);font-weight:600}
 h3{font-size:.95rem;margin:.8rem 0 .3rem}
 @media (max-width:600px){main{padding:.6rem}}

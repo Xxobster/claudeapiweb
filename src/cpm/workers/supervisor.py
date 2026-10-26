@@ -60,7 +60,7 @@ RUN_ENDED = (
     "BUDGET_STOPPED",
     "KILLED",
 )
-_STARTABLE = ("READY", "RESERVED", "PAUSED", "PAUSED_BUDGET")
+_STARTABLE = ("READY", "RESERVED", "PAUSED", "PAUSED_BUDGET", "CORRECTING")
 # intent -> (run status, task status, reason)
 _OUTCOMES = {
     "cancel": ("CANCELLED", "CANCELLED", "cancelled by user"),
@@ -268,6 +268,7 @@ class RunSupervisor:
         hang_timeout_s: float = 60.0,
         max_runtime_s: float = 3600.0,
         heartbeat_s: float = 5.0,
+        feedback: str | None = None,
     ) -> RunInfo:
         # Reserve the slot under the lock, then do the slow part (git checkout, spawn) outside it
         # so stop(), is_live() and the WebSocket stream are never blocked by a long checkout.
@@ -286,6 +287,7 @@ class RunSupervisor:
                 hang_timeout_s,
                 max_runtime_s,
                 heartbeat_s,
+                feedback,
             )
         finally:
             with self._lock:
@@ -335,6 +337,7 @@ class RunSupervisor:
         hang_timeout_s: float,
         max_runtime_s: float,
         heartbeat_s: float,
+        feedback: str | None = None,
     ) -> RunInfo:
         with Session(self.engine) as s:
             task = s.get(Task, task_id)
@@ -350,7 +353,10 @@ class RunSupervisor:
                 .order_by(Run.id.desc())
                 .limit(1)
             )
-            resumed = task.status in ("PAUSED", "PAUSED_BUDGET") and prev_session is not None
+            resumed = (
+                task.status in ("PAUSED", "PAUSED_BUDGET", "CORRECTING")
+                and prev_session is not None
+            )
             attempt = (
                 s.scalar(select(func.max(Run.attempt)).where(Run.task_id == task_id)) or 0
             ) + 1
@@ -396,7 +402,7 @@ class RunSupervisor:
                 run_id=0,
                 task_id=task_id,
                 provider="sdk" if billing == "api" else "mock",
-                prompt=build_prompt(data, branch=wt.branch, resumed=resumed),
+                prompt=build_prompt(data, branch=wt.branch, resumed=resumed, feedback=feedback),
                 worktree=str(wt.path),
                 model=model,
                 effort=effort,

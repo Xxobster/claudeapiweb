@@ -99,3 +99,13 @@
 - Worktrees found without an active task are reported, not removed, because they may hold the only copy of work (Nirandyr rule 27 spirit).
 - A backup of the DB is taken at every start (newest 10 kept, `data/backups/`) and on demand; restore is a stop-the-app command, not a web button.
 - Version 0.12.0, no migration.
+
+## 2026-10-26 (WP10) - implementation choices (awaiting Micah only if he disagrees)
+- A finished worker run ends in TESTING; the gate (clicked, or automatic with the scheduler) decides. Corrections are bounded (default 2, setting `gate.max_corrections`) and stop early when the same failure repeats.
+- Tasks need at least one acceptance criterion to be judged (scenario 15); without one the gate waits instead of passing. A task that changes nothing fails.
+- Project tests run only in a trusted workspace. A project with no known test command is judged without tests and the result says "skipped".
+- API-billed tasks have no live reviewer yet: they stop at "waiting for your review" and you approve after reading the diff (button on the task page). Mock tasks use the mock reviewer. The live reviewer (cheap model, no tools, diff-only) needs a budget go from Micah.
+- Publishing is a button, not automatic: push `claude/*` branch, open the PR with a fine-grained GitHub token kept in the Windows credential store. `INTEGRATED` = pull request opened; CPM never merges.
+- PR text always has: files changed, how it was tested, security findings, exploit findings, what still needs the PC (Nirandyr rules 37-40).
+- Version 0.13.0, migration 0005.
+

@@ -162,6 +162,7 @@ class Recovery:
             rep.runs.append(self._orphan_run(run_id, task_id))
             handled.add(task_id)
         self._stuck_tasks(rep, handled)
+        self._gate_tasks(rep, handled)
         self._release_unowned_reservations(rep, handled)
         rep.reservations_released += self._sweep()
         live = {r for r, _ in self._unfinished_runs() if self.is_live(r)}
@@ -239,6 +240,35 @@ class Recovery:
             except IllegalTransition:
                 continue
             self.reservations.release(task_id, reason="recovery")
+            rep.tasks_demoted.append(task_id)
+
+    def _gate_tasks(self, rep: RecoveryReport, handled: set[int]) -> None:
+        """Tasks the acceptance gate (WP10) was working on when CPM stopped.
+
+        TESTING needs nothing: the gate is idempotent and the scheduler runs it again. A review
+        that never reported goes back to TESTING (the verdict was lost, the gate asks again). A
+        CORRECTING task never has a worker (the correction run moves it to RUNNING), so one found
+        here lost its launch: a person decides (PAUSED), the scheduler never resumes it.
+        """
+        with Session(self.engine) as s:
+            rows = [
+                (int(i), st)
+                for i, st in s.execute(
+                    select(Task.id, Task.status).where(Task.status.in_(("REVIEWING", "CORRECTING")))
+                )
+            ]
+        for task_id, status in rows:
+            if task_id in handled:
+                continue
+            to, reason = (
+                ("TESTING", "review interrupted by CPM restart; the gate will ask again")
+                if status == "REVIEWING"
+                else ("PAUSED", "correction interrupted by CPM restart before its worker started")
+            )
+            try:
+                self.tasks.transition(task_id, to, actor=ACTOR, reason=reason, expect_from=status)
+            except IllegalTransition:
+                continue
             rep.tasks_demoted.append(task_id)
 
     def _release_unowned_reservations(self, rep: RecoveryReport, handled: set[int]) -> None:
