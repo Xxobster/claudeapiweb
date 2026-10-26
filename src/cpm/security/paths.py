@@ -20,7 +20,9 @@ _RESERVED = {
     "NUL",
     *(f"COM{i}" for i in range(10)),
     *(f"LPT{i}" for i in range(10)),
-}
+    "COM\u00b9", "COM\u00b2", "COM\u00b3", "LPT\u00b9", "LPT\u00b2", "LPT\u00b3",
+    "CONIN$", "CONOUT$",
+}  # fmt: skip
 _BAD_CHARS = re.compile(r'[<>"|?*\x00-\x1f]')
 _DRIVE = re.compile(r"^[A-Za-z]:(?=[\\/]|$)")
 
@@ -73,7 +75,10 @@ def _is_within(root: Path, child: Path) -> bool:
 
 
 def validate_root(path: str | os.PathLike[str]) -> Path:
-    """Return the real path of an approved root; it must be an existing absolute directory."""
+    """Return the real path of an approved root; it must be an existing absolute directory.
+
+    A filesystem or drive root is refused: approving it would approve the whole disk.
+    """
     raw = os.fspath(path).replace("\\", "/")
     _check_text(raw)
     if not Path(raw).is_absolute():
@@ -81,6 +86,8 @@ def validate_root(path: str | os.PathLike[str]) -> Path:
     real = _real(raw)
     if not real.is_dir():
         raise PathPolicyError("root does not exist or is not a directory")
+    if real == Path(real.anchor):
+        raise PathPolicyError("a drive or filesystem root cannot be an approved root")
     return real
 
 

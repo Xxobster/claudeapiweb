@@ -1,4 +1,4 @@
-# IMPACT_MAP (WP2, v0.2.0, 2026-10-24)
+# IMPACT_MAP (WP2, v0.2.1, 2026-10-26)
 
 Rule: before editing a module, read its row; after editing, update the row, the chains and the change log (CLAUDE.md rules 2 and 22). Modules marked (built) exist in code; the others describe the planned design (ARCHITECTURE.md).
 
@@ -54,3 +54,4 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 | 2026-10-21 | 0.0.1 | WP0: SDK_NOTES, ARCHITECTURE, THREATS, this skeleton, scripts/check_env.ps1, DECISIONS synced with the planning branch | CPM Plan thread |
 | 2026-10-24 | 0.2.0 | WP2: install token + Host/Origin/CSRF guard (HTTP and WebSocket), keyring secret store, key wizard/credentials API (Mock validator, gated live check), path validator, explicit child env, hash-locked dependencies, mypy strict, pip-audit in CI, `tests/security/` (traversal, injection, key exposure, CSRF, DNS rebinding) | CPM Code thread |
 | 2026-10-21 | 0.1.0 | WP1: skeleton (FastAPI `/health`, SQLAlchemy models for 11 core tables, Alembic baseline `0001`, WAL/FK/busy_timeout pragmas, redacting logger, loopback + no-OneDrive config checks, setup/start scripts, CI) | CPM Code thread |
+| 2026-10-26 | 0.2.1 | Security review of WP1/WP2: root-of-disk refused as approved root, git_url credentials rejected, response hardening headers, API docs disabled, extra reserved names, token-file recovery, CI read-only token (touches `security/middleware`, `security/paths`, `api/wizard`, `api/app`, `providers/keycheck`; WP3 project registry must use `validate_root`, which now refuses drive roots) | CPM Audit thread |

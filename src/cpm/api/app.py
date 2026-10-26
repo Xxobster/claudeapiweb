@@ -50,7 +50,14 @@ def create_app(
         yield
         engine.dispose()
 
-    app = FastAPI(title="Claude Project Manager", version=__version__, lifespan=lifespan)
+    app = FastAPI(
+        title="Claude Project Manager",
+        version=__version__,
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.settings = settings
     app.state.engine = engine
     app.state.secrets = secret_store or KeyringSecretStore()

@@ -63,6 +63,9 @@ class HttpKeyValidator:
             )
         except httpx.HTTPError:
             return KeyCheck(False, "network error while contacting the API")
+        finally:
+            if self._client is None:
+                client.close()
         if r.status_code == 200:
             return KeyCheck(True, "key accepted by the API")
         if r.status_code in (401, 403):

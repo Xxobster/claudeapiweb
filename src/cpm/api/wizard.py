@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -41,6 +42,11 @@ class WizardConfig(BaseModel):
             raise ValueError("git_url must be an https/ssh remote and must not start with '-'")
         if any(c.isspace() or ord(c) < 32 for c in v):
             raise ValueError("git_url contains whitespace")
+        parts = urlsplit(v) if "://" in v else None
+        if parts is not None and (
+            parts.password is not None or (parts.username and parts.scheme == "https")
+        ):
+            raise ValueError("git_url must not embed credentials")
         return v
 
     @model_validator(mode="after")

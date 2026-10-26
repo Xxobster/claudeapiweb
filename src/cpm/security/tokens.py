@@ -22,7 +22,10 @@ def load_or_create_token(data_dir: Path) -> str:
     data_dir.mkdir(parents=True, exist_ok=True)
     path = data_dir / TOKEN_FILE
     if path.exists():
-        value = path.read_text(encoding="ascii").strip()
+        try:
+            value = path.read_text(encoding="ascii").strip()
+        except UnicodeDecodeError:  # corrupt file: fall through and create a fresh token
+            value = ""
         if len(value) >= 32:
             register_secret(value)
             return value
