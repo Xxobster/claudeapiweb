@@ -118,3 +118,11 @@ def test_log_replay_skips_without_changing_results(tmp_path):
         log.append("text", n=i)
     assert [e["seq"] for e in log.read(3)] == [4, 5]
     assert len(log.read(0)) == 5
+
+
+def test_pause_racing_the_spawn_stays_paused_and_resumable(env, monkeypatch):
+    t = env.new_task()
+    answers = iter(["RUNNING", "PAUSED"])
+    monkeypatch.setattr(env.sup, "_task_status", lambda _id: next(answers))
+    run = env.sup.start(t.id, scenario="slow", scenario_args={"steps": 1000})
+    assert env.sup.wait(run.id).status == "STOPPED"

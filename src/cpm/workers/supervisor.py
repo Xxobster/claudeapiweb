@@ -455,8 +455,8 @@ class RunSupervisor:
         )
         with self._lock:
             self._live[run_id] = live
-        if self._task_status(task_id) != "RUNNING":  # cancel API raced with the spawn
-            live.intent = "cancel"
+        if (now := self._task_status(task_id)) != "RUNNING":  # cancel/pause raced with the spawn
+            live.intent = "pause" if now == "PAUSED" else "cancel"  # a pause stays resumable
             tree.kill()
         with Session(self.engine) as s:
             r = s.get(Run, run_id)
