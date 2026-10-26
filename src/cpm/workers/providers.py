@@ -21,11 +21,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cpm.workers.permissions import Decision, ToolContext, decide
+from cpm.workers.permissions import Decision, ToolContext, decide, non_idempotent_step
 
 Emit = Callable[..., None]
 SCENARIOS = (
     "success", "fail", "hang", "crash", "budget_burst", "grandchild", "slow", "sdk_budget_error",
+    "half_done",
 )  # fmt: skip
 
 
@@ -124,6 +125,12 @@ class MockProvider:
         )  # fmt: skip
         return 1
 
+    def _s_half_done(self) -> int:
+        """Dies inside a non-idempotent step (allowed `git commit`, never finished)."""
+        self._start()
+        self.emit("permission", tool="Bash", allowed=True, reason="ok", step="git commit")
+        os._exit(3)
+
     def _s_hang(self) -> int:
         self._start()
         time.sleep(3600)  # no heartbeat, no output: the watchdog must kill us
@@ -182,7 +189,8 @@ class AgentSdkProvider:
         import claude_agent_sdk as sdk
 
         d: Decision = decide(tool, inp, self.ctx)
-        self.emit("permission", tool=tool, allowed=d.allow, reason=d.reason)
+        step = non_idempotent_step(tool, inp) if d.allow else None
+        self.emit("permission", tool=tool, allowed=d.allow, reason=d.reason, step=step)
         if d.allow:
             if d.updated_command is not None:
                 return sdk.PermissionResultAllow(

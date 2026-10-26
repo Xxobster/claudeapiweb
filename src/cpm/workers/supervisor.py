@@ -138,6 +138,11 @@ class _Live:
     session_id: str | None = None
     exited: bool = False
     billing_mode: str = "mock"
+    open_step: str | None = None
+
+
+# Events that prove the model went on after a tool call, so an earlier step has finished.
+_STEP_DONE_EVENTS = frozenset({"permission", "text", "result", "stopped", "error", "session"})
 
 
 def _snapshot(s: Session, r: Run) -> RunInfo:
@@ -629,7 +634,15 @@ class RunSupervisor:
             self._beat(live)
             live.log.append("heartbeat")
             return
+        if live.open_step and kind in _STEP_DONE_EVENTS:
+            live.log.append("step_end", step=live.open_step)
+            live.open_step = None
         live.log.append(kind, **fields)
+        if kind == "permission" and fields.get("allowed") and isinstance(fields.get("step"), str):
+            # A non-idempotent step is marked before it may run; recovery pauses the task if the
+            # log ends inside it (cpm.recovery.reconcile).
+            live.open_step = fields["step"]
+            live.log.append("step_begin", step=live.open_step, idempotent=False)
         if kind == "usage":
             self._record_usage(live, fields)
         elif kind == "result":
@@ -707,6 +720,11 @@ class RunSupervisor:
             run_status, task_status, reason = "FAILED", "FAILED", "worker reported failure"
         else:
             run_status, task_status, reason = "CRASHED", "FAILED", f"worker died (exit {code})"
+        if live.open_step and task_status == "FAILED" and not (res is not None and not ok):
+            # killed or crashed inside a non-idempotent step: a retry could repeat it, so a person
+            # decides (the scheduler never resumes PAUSED work)
+            task_status = "PAUSED"
+            reason += f"; step '{live.open_step}' may be half done, check the worktree"
         if res and not ok and live.intent is None and run_status == "FAILED":
             reason = str(res.get("text") or reason)[:300]
         self._reconcile_total(live, res)

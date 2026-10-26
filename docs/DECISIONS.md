@@ -93,3 +93,9 @@
 - Automatic retries default to mock tasks only; API tasks are retried by the scheduler only if Micah turns it on (`retry_billing_modes`), because a retry spends again. Defaults: 2 automatic retries, 30 s delay, stop after 2 identical failures.
 - Heavy order: among heavy tasks of equal priority the smaller estimate goes first (Nirandyr rule 27). `heavy_limit` is fixed at 1 (Q8).
 - Paused/budget-paused tasks and hand-blocked tasks are never started or promoted by the scheduler.
+
+## 2026-10-26 (WP9) — implementation choices (awaiting Micah only if he disagrees)
+- On restart an orphaned RUNNING task becomes FAILED (the scheduler may retry mock tasks within its bounds; API tasks are retried only by a person), or PAUSED when it died inside a non-idempotent step (`git commit` today), so nothing is repeated without a human look. Recovery never starts, resumes or completes work.
+- Worktrees found without an active task are reported, not removed, because they may hold the only copy of work (Nirandyr rule 27 spirit).
+- A backup of the DB is taken at every start (newest 10 kept, `data/backups/`) and on demand; restore is a stop-the-app command, not a web button.
+- Version 0.12.0, no migration.

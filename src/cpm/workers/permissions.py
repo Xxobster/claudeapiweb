@@ -245,3 +245,17 @@ def decide(tool: str, inp: dict[str, Any], ctx: ToolContext) -> Decision:
     if tool in HARMLESS_TOOLS:
         return _ALLOW
     return _deny(f"tool {tool} is not allowed for workers")
+
+
+def non_idempotent_step(tool: str, inp: dict[str, Any]) -> str | None:
+    """Name of the step when an allowed call changes the repository in a way that cannot simply
+    be repeated (a commit). Recovery pauses such a task instead of failing it (WP9)."""
+    if tool != "Bash" or not isinstance(inp.get("command"), str):
+        return None
+    try:
+        argv = shlex.split(inp["command"])
+    except ValueError:
+        return None
+    if len(argv) >= 2 and argv[0] == "git" and argv[1] in _GIT_WRITE:
+        return f"git {argv[1]}"
+    return None
