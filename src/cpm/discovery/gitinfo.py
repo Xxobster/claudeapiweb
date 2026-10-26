@@ -47,11 +47,13 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _git(root: Path, *args: str, config: tuple[str, ...] = ()) -> str:
+def _git(
+    root: Path, *args: str, config: tuple[str, ...] = (), timeout: int = TIMEOUT_S
+) -> str:
     cmd = ["git", *_HARDEN, *config, "-C", str(root), *args]
     try:
         done = subprocess.run(  # noqa: S603
-            cmd, capture_output=True, text=True, timeout=TIMEOUT_S, env=_env(), check=False
+            cmd, capture_output=True, text=True, timeout=timeout, env=_env(), check=False
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise GitUnavailableError(type(exc).__name__) from exc
@@ -128,7 +130,9 @@ def _filter_overrides(root: Path) -> tuple[str, ...]:
     """`-c` arguments that blank every repo-defined content filter command.
 
     `git status` runs `filter.<name>.clean|smudge|process` to compare files, and those commands come
-    from the (untrusted) repo config. An empty command is ignored by git.
+    from the (untrusted) repo config. An empty command is ignored by git. (Diff drivers cannot be
+    blanked this way: an empty `diff.<name>.command` makes git try to run it. Workers use
+    `--no-ext-diff --no-textconv`, see `workers/permissions.harden_git`.)
     """
     try:
         listing = _git(root, "config", "--local", "--name-only", "--get-regexp", r"^filter\.")

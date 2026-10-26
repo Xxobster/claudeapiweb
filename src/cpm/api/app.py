@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from cpm import __version__
-from cpm.api import credentials, projects, tasks, wizard
+from cpm.api import credentials, projects, runs, tasks, wizard
 from cpm.config import Settings, load_settings
 from cpm.db.engine import make_engine
 from cpm.db.migrate import upgrade
@@ -23,6 +23,7 @@ from cpm.security.childenv import inherited_credential_vars
 from cpm.security.middleware import SecurityMiddleware
 from cpm.security.secrets_store import KeyringSecretStore, SecretStore
 from cpm.security.tokens import csrf_for, load_or_create_token
+from cpm.workers.supervisor import RunSupervisor
 
 log = logging.getLogger("cpm")
 
@@ -37,7 +38,7 @@ def create_app(
     engine = make_engine(settings.db_path)
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_logging(settings.log_level, settings.log_dir)
         upgrade(settings.db_url)
         leaked = inherited_credential_vars()
@@ -48,6 +49,7 @@ def create_app(
             )
         log.info("CPM %s started on %s:%s", __version__, settings.host, settings.port)
         yield
+        app.state.supervisor.shutdown()
         engine.dispose()
 
     app = FastAPI(
@@ -63,6 +65,7 @@ def create_app(
     app.state.secrets = secret_store or KeyringSecretStore()
     app.state.key_validator = key_validator or MockKeyValidator()
     app.state.live_validator = HttpKeyValidator()
+    app.state.supervisor = RunSupervisor(engine, settings, app.state.secrets)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_req: Request, exc: RequestValidationError) -> JSONResponse:
@@ -74,6 +77,7 @@ def create_app(
     app.include_router(wizard.router)
     app.include_router(projects.router)
     app.include_router(tasks.router)
+    app.include_router(runs.router)
 
     @app.get("/api/session")
     def session() -> dict[str, str]:

@@ -1,4 +1,4 @@
-# IMPACT_MAP (WP4, v0.4.0, 2026-10-26)
+# IMPACT_MAP (WP5, v0.5.0, 2026-10-26)
 
 Rule: before editing a module, read its row; after editing, update the row, the chains and the change log (CLAUDE.md rules 2 and 22). Modules marked (built) exist in code; the others describe the planned design (ARCHITECTURE.md).
 
@@ -11,8 +11,8 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 | `api` (built: `app.py`, `credentials.py`, `wizard.py`, `projects.py`, `tasks.py`) (FastAPI, WebSocket) | db, scheduler | UI, security middleware, event stream | WP1+ |
 | `discovery` (built: `discovery/{gitinfo,scan,commands,policy}.py`, `profiles.py`, `api/projects.py`, `profiles/*.yaml`) | managed repo (read-only), `projects`/`project_sources`/`events` tables, `approved_roots` + `project.<id>.patterns` settings | tasks import, worker prompts, workspace trust | WP3 |
 | `tasks` (built: `src/cpm/tasks/{states,service,todo_import,planner,prompts}.py`, `api/tasks.py`) | db (`tasks`, `task_deps`, `events`, `prompts`) | scheduler (ready queue, transitions), workers (RUNNING/TESTING...), acceptance gate (COMPLETED evidence), budgets (PAUSED_BUDGET), reservations (`declared_scope`), UI | WP4 |
-| `workers` (runner, providers) | worktrees, SDK | budget ledger, reservations, logs, Job Object, billing mode | WP5 |
-| `git` (worktrees, policy, PR) | managed repo, GitHub | tasks, security (token), reservations, UI review center | WP5, WP10 |
+| `workers` (built: `src/cpm/workers/{supervisor,run,providers,permissions,worktree,proctree,events,estimate,prompt}.py`, `api/runs.py`) | `runs`, `usage_events`, `events`, `tasks` (via `TaskService.transition` only), `data/runs/<id>/{spec.json,events.jsonl}`, worktrees, child processes | scheduler (calls `RunSupervisor.start`), budget ledger (reads `usage_events`, replaces `estimate.py`), reservations (`declared_scope` is enforced by `permissions._in_scope`), recovery (runs left RUNNING), acceptance gate (consumes TESTING tasks), lanes (add allowlists to `permissions`), UI (stream), Job Object, billing mode, `security/childenv`, `config` (`CPM_ALLOW_LIVE_RUNS`, `CPM_WORKTREE_ROOT`, `CPM_LIVE_RUN_MAX_MICROUSD`) | WP5 |
+| `git` (built for worktrees: `workers/worktree.py`, hardened calls via `discovery/gitinfo._git`; PR integration WP10) | managed repo's `.git` (worktree metadata only), worktree root | tasks, security (token), reservations, UI review center, recovery (orphan worktrees) | WP5, WP10 |
 | `locks` (reservations, adapters) | db, Nirandyr lock files | scheduler, UI conflict messages, Nirandyr scripts (read-only) | WP6 |
 | `scheduler` | locks, budget, workers | tasks, UI, resource classes (`heavy=1`) | WP7 |
 | `budget` (ledger, admission) | db | scheduler, workers (usage), UI cost center, SDK_NOTES prices | WP8 |
@@ -62,6 +62,15 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 - Profiles (`profiles/<name>.yaml`) are loaded with `yaml.safe_load` into a strict pydantic model (`extra=forbid`); name regex blocks traversal. Profile `path` is only a suggestion. New dependency: `pyyaml` (+ `types-PyYAML` for mypy); lockfile regenerated.
 - WP4 (tasks) can read `project_sources` rows of kind `task` for TODO import; WP6 reads `external_locks` from the profile; WP5 reads `worker_policy`.
 
+## 2e. WP5 notes
+- Only `RunSupervisor` changes `runs`/`usage_events` for a live run and it moves tasks only through `TaskService.transition` (actor `worker-supervisor`). Outcome table (`supervisor._OUTCOMES` + `_finalize`): cancel -> CANCELLED, pause -> PAUSED, budget -> PAUSED_BUDGET, hang/timeout/shutdown/crash/failure -> FAILED, clean result -> TESTING. Change it together with `tasks/states.py`, the scheduler (WP7), recovery (WP9) and the gate (WP10).
+- `api/tasks.py` `transition`/`cancel` first stop a live worker (`_via_worker`); any new route that moves a task to PAUSED/CANCELLED must do the same.
+- The child never sees the database or the secret store. API-billed children get `ANTHROPIC_API_KEY` through `childenv.build_child_env` only; mock children get `build_mock_env` (no credential). `register_secret(key)` is called when a live run starts.
+- `workers/permissions.py` is the single policy for what a worker may do. WP12 lanes extend its Bash allowlist per lane; never add a tool to the SDK `allowed_tools` (it bypasses `can_use_tool`). `decide` may return `updated_command` (git diff hardening); the SDK provider passes it as `updated_input`.
+- `workers/estimate.py` holds temporary prices (SDK_NOTES section 5). WP8 replaces it: keep `usage` event field names (`message_id, model, input_tokens, output_tokens, cache_*_tokens, cost_microusd`) or update `supervisor._record_usage`.
+- Admission is NOT done here: no reservation conflict check (WP6), no global budget admission (WP8), only the per-run cap, `max_parallel_agents` and one live run per task. WP7 must call `start` only after those checks.
+- Added `config.Settings.{allow_live_runs, live_run_max_microusd, worktree_root, runs_dir}`, `gitinfo._git(timeout=)`, `childenv.{build_mock_env, git_config_env, extra=}`, optional dependency extra `sdk` (`claude-agent-sdk==0.2.170`, not in the hash lockfile: pin and add it when the first live test is approved), no schema change.
+
 ## 2b. WP1 notes
 - Adding/changing a column: edit `models.py`, generate a new Alembic revision (never edit `0001`), re-run `tests/integration/test_health_and_db.py`, update backup/restore (WP9) and the cost ledger (WP8) if money or usage columns change.
 - Money columns are integer micro-dollars (`*_microusd`); convert with `Decimal` at the edges only.
@@ -72,6 +81,7 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 ## 4. Change log
 | Date | Version | Change | By |
 |---|---|---|---|
+| 2026-10-26 | 0.5.0 | WP5: worker runner (`cpm.workers`): child process per task with tree-kill (Job Object on Windows), heartbeat/hang watchdog, per-run budget backstop, JSONL event log + REST/WebSocket stream, cancel/pause/resume, MockProvider scenarios, `AgentSdkProvider` behind the live-run gates (never run live), worktree manager, tool permission policy; `/api/tasks/{id}/runs`, `/api/runs/*`; config flags; no migration (touches `api/app`, `api/tasks`, `config`, `security/childenv`, `discovery/gitinfo`) | CPM Code thread (WP5) |
 | 2026-10-26 | 0.3.0 | WP3: project registry API (`/api/projects`, `/api/profiles`), read-only git inspection, instruction/memory/task source discovery with include/exclude/refresh and custom globs, command detection, workspace-trust flag + `worker_policy`, `profiles/nirandyr.yaml`, fixture-repo tests for acceptance scenarios 1-3, `pyyaml` dependency | CPM Code thread |
 | 2026-10-21 | 0.0.1 | WP0: SDK_NOTES, ARCHITECTURE, THREATS, this skeleton, scripts/check_env.ps1, DECISIONS synced with the planning branch | CPM Plan thread |
 | 2026-10-24 | 0.2.0 | WP2: install token + Host/Origin/CSRF guard (HTTP and WebSocket), keyring secret store, key wizard/credentials API (Mock validator, gated live check), path validator, explicit child env, hash-locked dependencies, mypy strict, pip-audit in CI, `tests/security/` (traversal, injection, key exposure, CSRF, DNS rebinding) | CPM Code thread |

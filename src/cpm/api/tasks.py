@@ -13,6 +13,7 @@ from cpm.tasks.planner import get_planner
 from cpm.tasks.prompts import PromptStore
 from cpm.tasks.service import TaskData, TaskError, TaskService
 from cpm.tasks.todo_import import import_todo
+from cpm.workers.supervisor import RunError
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 ACTOR = "user"
@@ -191,11 +192,31 @@ def edit_task(request: Request, task_id: int, body: TaskPatch) -> dict[str, Any]
     return _out(_call(_svc(request).edit, task_id, actor=ACTOR, **changes))
 
 
+def _via_worker(request: Request, task_id: int, to: str) -> dict[str, Any] | None:
+    """A pause/cancel of a task with a live worker must stop that worker first (WP5).
+
+    Otherwise the task would say CANCELLED while its process keeps running and editing files.
+    The supervisor moves the task itself once the process tree is gone.
+    """
+    sup = request.app.state.supervisor
+    run_id = sup.live_run_for_task(task_id)
+    if run_id is None or to not in ("PAUSED", "CANCELLED"):
+        return None
+    try:
+        sup.stop(run_id, "cancel" if to == "CANCELLED" else "pause")
+    except RunError as e:
+        raise HTTPException(e.status, str(e)) from e
+    sup.wait(run_id, 15.0)
+    return _out(_svc(request).get(task_id))
+
+
 @router.post("/tasks/{task_id}/transition")
 def transition(request: Request, task_id: int, body: TransitionIn) -> dict[str, Any]:
     """Human-requested moves only. Worker/gate-driven states are refused here (409)."""
     if body.to not in states.USER_TARGETS:
         raise HTTPException(409, f"{body.to} is set by the scheduler, workers or acceptance gate")
+    if (stopped := _via_worker(request, task_id, body.to)) is not None:
+        return stopped
     svc = _svc(request)
     if body.to == "READY":
         return _out(_call(svc.mark_ready, task_id, actor=ACTOR))
@@ -205,6 +226,8 @@ def transition(request: Request, task_id: int, body: TransitionIn) -> dict[str, 
 @router.post("/tasks/{task_id}/cancel")
 def cancel(request: Request, task_id: int, body: TransitionIn | None = None) -> dict[str, Any]:
     reason = body.reason if body else None
+    if (stopped := _via_worker(request, task_id, "CANCELLED")) is not None:
+        return stopped
     return _out(_call(_svc(request).cancel, task_id, actor=ACTOR, reason=reason))
 
 
