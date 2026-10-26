@@ -82,8 +82,10 @@ def _inside(ctx: ToolContext, raw: object) -> Path | str:
         return "missing path"
     if raw.startswith("~"):
         return "home-relative paths are not allowed"
-    # The SDK hands tools absolute paths (cwd-joined), so a drive path is fine when `resolve_within`
-    # proves it stays inside the worktree; any other drive path is refused there.
+    # On Windows the SDK hands tools absolute (cwd-joined) paths, so a drive path is fine when
+    # `resolve_within` proves it stays inside the worktree. Elsewhere it is not a real path.
+    if os.name != "nt" and _DRIVE.match(raw):
+        return "drive paths are not allowed"
     try:
         return resolve_within(ctx.worktree, raw)
     except PathPolicyError as exc:
