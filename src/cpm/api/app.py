@@ -78,6 +78,8 @@ def create_app(
             loop_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await loop_task
+            # cancelling the await does not stop a tick running in its thread: drain it first
+            await asyncio.to_thread(app.state.scheduler.stop)
         app.state.supervisor.shutdown()
         engine.dispose()
 

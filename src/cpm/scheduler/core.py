@@ -114,6 +114,7 @@ class Scheduler:
         self._last_scan: dict[int, float] = {}
         self._last: TickReport | None = None
         self._started = False
+        self._stopping = False
 
     # ----------------------------------------------------------------- settings
     def config(self) -> SchedulerConfig:
@@ -144,6 +145,12 @@ class Scheduler:
         if not self._started:
             self._started = True
             self.reservations.sweep()
+
+    def stop(self) -> None:
+        """Shutdown: refuse new ticks and wait for the one in progress (it may be spawning)."""
+        self._stopping = True
+        with self._tick_lock:
+            pass
 
     def status(self) -> dict[str, Any]:
         cfg = self.config()
@@ -191,6 +198,9 @@ class Scheduler:
             report.errors.append("another tick is running")
             return report
         try:
+            if self._stopping:
+                report.errors.append("scheduler is stopping")
+                return report
             self.start()
             cfg = self.config()
             report.paused = self.paused()
@@ -242,8 +252,9 @@ class Scheduler:
             elif st == "RESERVED":  # reserved, but the launch never happened (crash, refusal)
                 try:
                     self.tasks.transition(
-                        tid, "READY", actor=ACTOR, reason="reserved without a worker"
-                    )
+                        tid, "READY", actor=ACTOR, reason="reserved without a worker",
+                        expect_from="RESERVED",
+                    )  # fmt: skip
                     report.demoted.append(tid)
                 except IllegalTransition:
                     continue
@@ -375,6 +386,8 @@ class Scheduler:
         heavy_running = len(self._heavy_holders())
         limit = self.global_limit()
         for c in cands:
+            if self._stopping:
+                break
             if total >= limit:
                 report.skipped[c.task_id] = f"waiting: {limit} workers already running"
                 continue
@@ -435,7 +448,12 @@ class Scheduler:
         if self.supervisor.busy(task_id):
             return
         try:
-            self.tasks.transition(task_id, "READY", actor=ACTOR, reason="launch did not happen")
+            # Only a task still RESERVED goes back: a start that failed after RUNNING/FAILED keeps
+            # its state (so retry bounds apply), and a concurrent pause/block is not undone.
+            self.tasks.transition(
+                task_id, "READY", actor=ACTOR, reason="launch did not happen",
+                expect_from="RESERVED",
+            )  # fmt: skip
         except (IllegalTransition, TaskError):
             pass  # was never RESERVED, or a person moved it meanwhile
         self.admission.release(task_id, reason="launch did not happen")

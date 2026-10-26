@@ -312,6 +312,7 @@ class TaskService:
         actor: str,
         reason: str | None = None,
         evidence: dict[str, Any] | None = None,
+        expect_from: str | None = None,
     ) -> TaskData:
         """Move a task along `states.TRANSITIONS`.
 
@@ -323,6 +324,8 @@ class TaskService:
         with _graph_lock, Session(self.engine) as s:
             t = self._get(s, task_id)
             src = t.status
+            if expect_from is not None and src != expect_from:
+                raise IllegalTransition(f"task is {src}, expected {expect_from}")
             if not states.can_transition(src, to):
                 raise IllegalTransition(f"{src} -> {to} is not allowed")
             if to == "COMPLETED" and (evidence or {}).get("acceptance_gate") != "passed":

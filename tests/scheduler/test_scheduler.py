@@ -215,3 +215,47 @@ def test_loop_runs_ticks(senv):
     assert senv.sup.list_runs(a.id)
     senv.finish_all()
     time.sleep(0)
+
+
+def test_failed_launch_keeps_failed_state_so_retry_bounds_apply(senv):
+    """A start that fails after the task left RESERVED must not be undone to READY."""
+    senv.sched.set_config({"max_auto_retries": 0})
+    t = senv.task("x", scope=["x/"])
+    real = senv.sup.start
+
+    def boom(task_id, **kw):
+        senv.tasks.transition(task_id, "RUNNING", actor="t")
+        senv.tasks.transition(task_id, "FAILED", actor="t")
+        raise RuntimeError("spawn failed")
+
+    senv.sup.start = boom
+    try:
+        senv.sched.tick()
+    finally:
+        senv.sup.start = real
+    assert senv.status(t.id) == "FAILED" and senv.held() == []
+    senv.sched.tick()
+    assert senv.status(t.id) == "FAILED"  # not relaunched: retries are off
+
+
+def test_unwind_does_not_undo_a_user_pause(senv):
+    t = senv.task("x", scope=["x/"])
+    real = senv.sup.start
+
+    def pause_then_fail(task_id, **kw):
+        senv.tasks.transition(task_id, "PAUSED", actor="user")
+        raise RuntimeError("spawn failed")
+
+    senv.sup.start = pause_then_fail
+    try:
+        senv.sched.tick()
+    finally:
+        senv.sup.start = real
+    assert senv.status(t.id) == "PAUSED" and senv.held() == []
+
+
+def test_stop_drains_and_blocks_new_ticks(senv):
+    senv.task("x", scope=["x/"], slow=2)
+    senv.sched.stop()
+    rep = senv.sched.tick()
+    assert rep.errors == ["scheduler is stopping"] and rep.started == []
