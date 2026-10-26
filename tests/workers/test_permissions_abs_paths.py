@@ -1,4 +1,4 @@
-"""The SDK passes tools absolute (cwd-joined) paths: inside the worktree they are fine, elsewhere not."""
+"""The SDK passes tools absolute (cwd-joined) paths: fine inside the worktree, denied elsewhere."""
 
 from pathlib import Path
 
