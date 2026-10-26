@@ -1,0 +1,22 @@
+# Nirandyr profile (PLAN.md section 5). Extended in WP6 (locks) and WP12 (lanes).
+id: nirandyr
+path: 'D:\projects\game'          # read-only for CPM; main tree edited only by Desktop
+remote: https://github.com/Xxobster/Nirandyr
+worktree_root: 'D:\projects\cpm-worktrees\nirandyr'
+integration: pr_only               # rules 37-40; never push main; Compilation merges
+protected_branches: [main]
+branch_pattern: "claude/{role}-{task_slug}"
+instruction_sources:
+  - docs/plans/00_DECISIONS_MICAH.md
+  - docs/plans/99_IMPACT_MAP.md
+task_sources:
+  - docs/JOB_BOARD.md
+  - docs/COORDINATOR_INBOX.md
+external_locks:
+  job_board: docs/JOB_BOARD.md      # read-only in v1
+  devlock: tools/devices/devlock.py
+  build_lock: 'D:\projects\game-build\BUILD_RUNNING.lock'
+  gpu_lock: tools/gpu_lock.sh
+heavy_resources: [unity_editor, gpu, blender, device]
+default_effort: medium
+pr_body_must_list: [files_changed, security_findings, exploit_findings, what_needs_pc]

@@ -1,4 +1,4 @@
-# IMPACT_MAP (WP2, v0.2.1, 2026-10-26)
+# IMPACT_MAP (WP3, v0.3.0, 2026-10-26)
 
 Rule: before editing a module, read its row; after editing, update the row, the chains and the change log (CLAUDE.md rules 2 and 22). Modules marked (built) exist in code; the others describe the planned design (ARCHITECTURE.md).
 
@@ -8,8 +8,8 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 | `db` (built: `src/cpm/db/{engine,models,migrate}.py`, `migrations/`) | SQLite | every module; migrations; backup/restore; security tests on schema | WP1 |
 | `security` (built: `redaction.py`, `tokens.py`, `middleware.py`, `secrets_store.py`, `paths.py`, `childenv.py`; `config.py` loopback + no-OneDrive) | keyring, `data/install_token`, logs | api, workers (env), git, discovery, reservations (paths), all tests/security | WP1-2 |
 | `providers/keycheck` (built: Mock + HTTP key validators) | Anthropic `/v1/models` only when live flag set | api/credentials, WP5 providers | WP2 |
-| `api` (built: `app.py`, `credentials.py`, `wizard.py`) (FastAPI, WebSocket) | db, scheduler | UI, security middleware, event stream | WP1+ |
-| `discovery` | managed repo (read-only) | tasks import, worker prompts, workspace trust | WP3 |
+| `api` (built: `app.py`, `credentials.py`, `wizard.py`, `projects.py`) (FastAPI, WebSocket) | db, scheduler | UI, security middleware, event stream | WP1+ |
+| `discovery` (built: `discovery/{gitinfo,scan,commands,policy}.py`, `profiles.py`, `api/projects.py`, `profiles/*.yaml`) | managed repo (read-only), `projects`/`project_sources`/`events` tables, `approved_roots` + `project.<id>.patterns` settings | tasks import, worker prompts, workspace trust | WP3 |
 | `tasks` (DAG, state machine) | db | scheduler, UI, acceptance gate, budgets | WP4 |
 | `workers` (runner, providers) | worktrees, SDK | budget ledger, reservations, logs, Job Object, billing mode | WP5 |
 | `git` (worktrees, policy, PR) | managed repo, GitHub | tasks, security (token), reservations, UI review center | WP5, WP10 |
@@ -41,6 +41,15 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 ## 3. Open risks (see THREATS.md for the full list)
 High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Micah's decision). Process: subscription use of the SDK unverified (CLI mode stays a stub); Admin cost API availability unknown.
 
+## 2d. WP3 notes
+- Registering a project is the user's explicit grant of that folder: `POST /api/projects` validates the path (`validate_root`), refuses overlap with the data dir and adds the real path to `approved_roots`. Removal only deletes the DB rows; nothing on disk is touched. No schema change (v0.3.0 reuses `projects`/`project_sources`; user globs live in `settings` key `project.<id>.patterns`).
+- All git calls go through `discovery/gitinfo._git`: argument lists, `-c core.fsmonitor=false -c core.hooksPath=<null>`, no prompts, no network command, minimal env (no tokens). Credentials embedded in remote URLs are stripped before storing/returning. Never add a git call that can reach the network or run a repo-defined program.
+- Discovery hashes files, never returns contents (T-05). A source that resolves outside the root (symlink/junction) is dropped. Globs are checked by `scan.check_pattern`.
+- Workspace trust: `worker_policy(trusted)` (`discovery/policy.py`) is the single source for the runner (WP5): untrusted -> `setting_sources=()`, no hooks/MCP/scripts; trusted -> `("project",)`. `user` is never loaded. Consequence: untrusted workers do not load the project's CLAUDE.md natively; the UI (WP15) must tell the user to trust the workspace first. Files that can carry hooks/MCP (`.claude/settings*.json`, `.claude/skills/*`, `.mcp.json`) report `requires_trust` and `active=false` until trusted.
+- Command detection only reads manifests and returns argv lists (`npm run test`, `python -m pytest`, ...); script bodies are never reported or run. WP10 must still run them through the acceptance gate with allowlists.
+- Profiles (`profiles/<name>.yaml`) are loaded with `yaml.safe_load` into a strict pydantic model (`extra=forbid`); name regex blocks traversal. Profile `path` is only a suggestion. New dependency: `pyyaml` (+ `types-PyYAML` for mypy); lockfile regenerated.
+- WP4 (tasks) can read `project_sources` rows of kind `task` for TODO import; WP6 reads `external_locks` from the profile; WP5 reads `worker_policy`.
+
 ## 2b. WP1 notes
 - Adding/changing a column: edit `models.py`, generate a new Alembic revision (never edit `0001`), re-run `tests/integration/test_health_and_db.py`, update backup/restore (WP9) and the cost ledger (WP8) if money or usage columns change.
 - Money columns are integer micro-dollars (`*_microusd`); convert with `Decimal` at the edges only.
@@ -51,6 +60,7 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 ## 4. Change log
 | Date | Version | Change | By |
 |---|---|---|---|
+| 2026-10-26 | 0.3.0 | WP3: project registry API (`/api/projects`, `/api/profiles`), read-only git inspection, instruction/memory/task source discovery with include/exclude/refresh and custom globs, command detection, workspace-trust flag + `worker_policy`, `profiles/nirandyr.yaml`, fixture-repo tests for acceptance scenarios 1-3, `pyyaml` dependency | CPM Code thread |
 | 2026-10-21 | 0.0.1 | WP0: SDK_NOTES, ARCHITECTURE, THREATS, this skeleton, scripts/check_env.ps1, DECISIONS synced with the planning branch | CPM Plan thread |
 | 2026-10-24 | 0.2.0 | WP2: install token + Host/Origin/CSRF guard (HTTP and WebSocket), keyring secret store, key wizard/credentials API (Mock validator, gated live check), path validator, explicit child env, hash-locked dependencies, mypy strict, pip-audit in CI, `tests/security/` (traversal, injection, key exposure, CSRF, DNS rebinding) | CPM Code thread |
 | 2026-10-21 | 0.1.0 | WP1: skeleton (FastAPI `/health`, SQLAlchemy models for 11 core tables, Alembic baseline `0001`, WAL/FK/busy_timeout pragmas, redacting logger, loopback + no-OneDrive config checks, setup/start scripts, CI) | CPM Code thread |

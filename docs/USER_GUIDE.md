@@ -20,6 +20,13 @@
 - If `ANTHROPIC_API_KEY` or similar variables are set in your Windows environment, CPM warns at startup and never passes them to workers.
 - After pulling this version re-run `scripts\setup.ps1` (dependencies are now hash-locked and include `keyring`).
 
+## Projects (v0.3.0, API only; the screens come with the UI work package)
+- `POST /api/projects` with `{name, path, remote_url?, profile?}` registers a project. The folder is only ever read. If it is a git repo, CPM reads the `origin` remote (credentials in the URL are removed); if there is none, the project shows `needs_remote: true` and you set it with `PUT /api/projects/{id}/remote`.
+- CPM finds `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `MEMORY.md`, `.claude/rules`, `.claude/skills`, `.claude/settings*.json`, `.mcp.json`, `TODO.md` and `docs/TODO.md` (plus the profile's files, for example Nirandyr's `docs/JOB_BOARD.md`). It stores only a hash, never the text. Turn a source off or on with `PUT /api/projects/{id}/sources/{sid}`, rescan with `POST .../refresh`, add your own pattern with `POST .../patterns`.
+- A new project is **not trusted**: its hooks, MCP servers, skills and settings files stay off and workers load no project settings. Trust it with `PUT .../trust {"trusted": true}` only for projects you wrote or reviewed.
+- `profile: "nirandyr"` applies the Nirandyr profile (`profiles/nirandyr.yaml`). Removing a project (`DELETE`) only forgets it; your files are untouched.
+- After pulling this version re-run `scripts\setup.ps1` (new dependency `pyyaml`).
+
 ## What exists in v0.1.0 (skeleton)
 Only the skeleton: `/health`, database with all core tables, migrations, redacted logging. No API key is needed or read. The UI, security middleware and key wizard come in later work packages (PLAN.md WP2+).
 
