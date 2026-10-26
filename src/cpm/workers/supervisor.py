@@ -32,6 +32,7 @@ from cpm.db.models import Event, Project, Run, Task, UsageEvent, utcnow
 from cpm.db.settings_repo import get_setting
 from cpm.discovery.gitinfo import _filter_overrides
 from cpm.discovery.policy import worker_policy
+from cpm.lanes.service import LaneError, LaneService
 from cpm.security.childenv import build_child_env, build_mock_env, git_config_env
 from cpm.security.paths import PathPolicyError, resolve_in_any
 from cpm.security.redaction import redact, register_secret
@@ -194,8 +195,10 @@ class RunSupervisor:
         *,
         python: str | None = None,
         ledger: BudgetLedger | None = None,
+        lanes: LaneService | None = None,
     ) -> None:
         self.engine = engine
+        self.lanes = lanes or LaneService(engine)
         self.ledger = ledger or BudgetLedger(engine)
         self.settings = settings
         self.secrets = secrets
@@ -365,6 +368,7 @@ class RunSupervisor:
             title, project_path, slug = task.title, Path(project.path), project.slug
             trusted, prior_status = bool(project.workspace_trusted), task.status
             project_id_ = project.id
+            lane_id = task.lane
 
         key: str | None = None
         cap: int | None = max_budget_microusd
@@ -389,6 +393,16 @@ class RunSupervisor:
             )
         except PathPolicyError as exc:
             raise RunRefused(f"project path is not inside an approved root: {exc}") from exc
+        lane_ctx = None
+        if lane_id:  # before any budget is held: a lane that cannot run costs nothing
+            try:
+                lane_ctx = self.lanes.context(project_id_, lane_id)
+            except LaneError as exc:
+                raise RunRefused(str(exc)) from exc
+            if lane_ctx is not None:
+                problems = self.lanes.preflight(lane_ctx)
+                if problems:
+                    raise RunRefused("lane " + lane_id + ": " + "; ".join(problems))
         reservation = self._admit(billing, task_id, project_id_, cap)
         try:
             data = self.tasks.get(task_id)
@@ -402,7 +416,10 @@ class RunSupervisor:
                 run_id=0,
                 task_id=task_id,
                 provider="sdk" if billing == "api" else "mock",
-                prompt=build_prompt(data, branch=wt.branch, resumed=resumed, feedback=feedback),
+                prompt=build_prompt(
+                    data, branch=wt.branch, resumed=resumed, feedback=feedback,
+                    lane_text=self.lanes.prompt_section(lane_ctx) if lane_ctx else None,
+                ),
                 worktree=str(wt.path),
                 model=model,
                 effort=effort,
@@ -414,6 +431,7 @@ class RunSupervisor:
                 max_budget_usd=float(Decimal(cap) / _MICRO) if cap else None,
                 resume_session_id=prev_session if resumed else None,
                 heartbeat_s=heartbeat_s,
+                lane=self.lanes.run_extra(lane_ctx) if lane_ctx else None,
             )
 
             extra = {"PYTHONIOENCODING": "utf-8"}

@@ -114,3 +114,10 @@
 - A claim row is `CPM #<task id>: <title> | cpm | <declared scope> | claimed | <date>`; release marks the same row `released` and keeps it. The claimed set is the task's declared scope.
 - The board is edited only if it has a Markdown table with files, status and job columns; otherwise CPM refuses (the real layout is still to verify on the PC).
 - Version 0.14.0, migration 0006.
+
+## 2026-10-26 (WP12) - implementation choices (awaiting Micah only if he disagrees)
+- A lane is configuration in the project profile, not code: command allowlist, resources, validators, artifact policy and report format. WP13 (voice) and WP14 (3D, map, Unity) add profile entries and register validators; they do not change the engine.
+- A lane's allowed commands are exact: program name, fixed prefix, listed flags, path arguments confined to the worktree (outputs also to the lane's asset paths). Shells, network tools, deletion tools and git can never be allowed; interpreters only for one fixed script.
+- Binary outputs (audio, models, textures) default to `ask`: the gate stops and tells you which files need your decision (Nirandyr rules on binaries). `lfs_only` accepts them when `.gitattributes` routes them to Git LFS; `deny` refuses them. CPM never edits `.gitattributes` or installs LFS.
+- A lane whose tool is missing on the PC is deferred (like a refused budget), not failed. A lane check that cannot run on this PC makes the gate wait instead of passing.
+- Version 0.15.0, migration 0007. No real API or GitHub call was made.

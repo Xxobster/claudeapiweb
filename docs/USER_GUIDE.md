@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.14.0)
+# USER_GUIDE (v0.15.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -98,6 +98,16 @@ When a worker finishes, its task waits in **TESTING**. The **acceptance gate** t
 Nirandyr rule 40: other threads must see which files a job holds. On a task's page, the **Job board** box opens a docs-only pull request that adds one row (task, `cpm` as owner, the task's declared scope, `claimed`) to the project's `docs/JOB_BOARD.md`; merge it on GitHub to make the claim visible. When the work is finished, **Release the claim** opens a second pull request that marks the row `released` (it needs the claim PR to be merged first). Nothing is claimed or released automatically, and CPM never merges.
 - Needs: a saved GitHub token (Git & review page), a project with a profile that names a job board (Nirandyr does), an `origin` remote on github.com and an up-to-date `origin/main` in your clone (fetch it in your own tree; CPM does not). CPM refuses when the board has no table with files / status / job columns, when the scope overlaps another owner's active claim, or when the task has no declared scope.
 - API: `GET /api/tasks/{id}/job-board`, `POST /api/tasks/{id}/job-board/claim|release`.
+## Lanes (v0.15.0)
+A **lane** is a recipe for one kind of work (voice lines, 3D assets, maps, Unity checks). It lives in the project profile (`profiles/<project>.yaml`, key `lanes:`); CPM ships the framework, the concrete lanes come next. A lane says:
+- **task_template**: title prefix, description, inputs you must fill (e.g. `scene`), default scope and acceptance criteria;
+- **required_tools / required_paths**: absolute paths that must exist on the PC. If one is missing the task is not started (it waits, nothing is charged);
+- **resources**: `gpu`, `unity_editor`, `blender`, `device`... These make the task heavy: one at a time, never while `BUILD_RUNNING.lock` or another Nirandyr lock exists;
+- **commands**: the only extra commands the worker may run (exact program, listed options, paths inside its worktree). Everything else stays refused;
+- **artifacts**: folders outputs must go to, allowed extensions, size limit and the **binary policy** (`ask` = the gate stops and asks you, `lfs_only`, `deny`);
+- **validators**: checks run by the acceptance gate on the outputs (`files_exist`, `file_size`, `name_pattern`, `json_keys` built in; voice/3D/map/Unity ones come with their lanes);
+- **report**: headings the worker's final answer must contain; **limits**: run time and hang timeout.
+Use it: `GET /api/projects/{id}/lanes` lists a project's lanes (and what is missing on this PC), `POST /api/projects/{id}/lanes/{lane}/tasks` with `{"title": ..., "inputs": {...}}` creates a task from the template (it starts in BACKLOG like any task). In the gate, failed checks go back to the worker as a correction; binaries awaiting your decision, or checks that cannot run on this PC, leave the task in TESTING with the reason. There is no lane screen yet.
 
 ## Restart and backups (v0.12.0)
 - When CPM starts it first copies the database to `data\backups\` (the newest 10 are kept), then checks for work that was interrupted by a stop or crash. Interrupted tasks are marked **FAILED** (or **PAUSED** if they were in the middle of a commit: check the task's worktree, then resume or retry yourself). Locks and budget holds of those tasks are freed. Nothing is started or completed by this check.

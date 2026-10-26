@@ -83,6 +83,7 @@ class Task(Base):
     effort: Mapped[str | None] = mapped_column(String(16))
     billing_mode: Mapped[str] = mapped_column(String(8), default="api")
     declared_scope: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of paths
+    lane: Mapped[str | None] = mapped_column(String(64))  # profile lane id (WP12), if any
     acceptance: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of criteria
     estimate_microusd: Mapped[int] = mapped_column(BigInteger, default=0)
     block_reason: Mapped[str | None] = mapped_column(Text)

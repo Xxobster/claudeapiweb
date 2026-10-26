@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,9 @@ class ToolContext:
     worktree: Path
     scope: tuple[str, ...] = ()  # project-relative paths; '/' suffix = prefix; empty = whole tree
     trusted: bool = False
+    # Extra Bash commands a lane allows (WP12, `cpm.lanes.commands.make_hook`): called with the
+    # tokens of one simple command after the shell-operator filter; None = not one of its commands.
+    bash_extra: Callable[[ToolContext, list[str]], Decision | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -221,6 +225,10 @@ def _decide_bash(ctx: ToolContext, inp: dict[str, Any]) -> Decision:
         return _deny("command could not be parsed")
     if not tokens:
         return _deny("empty command")
+    if ctx.bash_extra is not None:  # a lane rule is more specific than the built-in allowlist
+        extra = ctx.bash_extra(ctx, tokens)
+        if extra is not None:
+            return extra
     head = tokens[0].lower()
     if head == "git":
         return _decide_git(ctx, tokens)
