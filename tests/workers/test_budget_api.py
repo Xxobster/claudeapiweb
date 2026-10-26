@@ -26,8 +26,10 @@ def api(tmp_path):
     with TestClient(app, base_url="http://127.0.0.1:8765") as c:
         token = load_or_create_token(settings.data_dir)
         h = {"X-CPM-Token": token, "X-CPM-CSRF": csrf_for(token)}
+        repo = make_repo(tmp_path / "repo")
+        set_setting(app.state.engine, "approved_roots", [str(repo)])
         with Session(app.state.engine) as s:
-            p = Project(slug="demo", name="Demo", path=str(make_repo(tmp_path / "repo")))
+            p = Project(slug="demo", name="Demo", path=str(repo))
             s.add(p)
             s.commit()
             pid = p.id

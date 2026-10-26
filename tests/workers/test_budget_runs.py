@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from cpm.db.models import Event, Project
-from cpm.db.settings_repo import set_setting
+from cpm.db.settings_repo import get_setting, set_setting
 from cpm.workers.supervisor import BudgetRefused, RunRefused
 from tests.fixtures.repos import make_repo
 
@@ -21,8 +21,11 @@ def cfg(env, month=10, project=10, task=10):
 
 
 def second_project(env, tmp_path):
+    repo = make_repo(tmp_path / "other repo")
+    roots = get_setting(env.engine, "approved_roots", [])
+    set_setting(env.engine, "approved_roots", [*roots, str(repo)])
     with Session(env.engine) as s:
-        p = Project(slug="other", name="Other", path=str(make_repo(tmp_path / "other repo")))
+        p = Project(slug="other", name="Other", path=str(repo))
         s.add(p)
         s.commit()
         return p.id

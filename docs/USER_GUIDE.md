@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.5.1)
+# USER_GUIDE (v0.6.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -47,6 +47,17 @@ A run is one worker process for one task. It works in its own git worktree under
 - **Real (API-billed) runs need all of these**: start CPM with `CPM_ALLOW_LIVE_RUNS=1`, finish the wizard (budget cap + key), install the SDK with `pip install -e ".[sdk]"`, and send `max_budget_microusd` with the start request (at most the task budget and at most `CPM_LIVE_RUN_MAX_MICROUSD`, default 2 000 000 = 2 USD, the approved first live test). All runs of one task (retries, resumes) share that ceiling: a new run is refused if the task has already spent too much. A project whose folder is no longer inside an approved root cannot start workers. The run stops by itself when the estimated spend reaches that cap (task becomes PAUSED_BUDGET). Do this only after you decide to run the first live test.
 - Untrusted projects: the worker may edit files in its worktree and read the project, but cannot run tests or linters (they execute repository code); trust the project first to allow `python -m pytest|ruff|mypy`. Workers can never push, fetch, use the network, or touch `.git`, `.claude` or `.mcp.json`.
 - Limits: `max_parallel_agents` from the wizard (default 3, hard maximum 8) counts running workers. Settings: `CPM_WORKTREE_ROOT` (default: `cpm-worktrees` next to the CPM folder, never inside OneDrive or inside the managed project).
+
+## Budget and cost center (v0.6.0, API only; the screen comes with the UI work package)
+CPM keeps one ledger of every message's cost and refuses to start a run that would not fit. Every number is an **estimate** (token counts times the price table) until you reconcile it with the Console.
+- Where you see it: `GET /api/budget` (month, per project, held money, level 0/70/90/100, credit balance), `GET /api/tasks/{id}/budget`, `GET /api/budget/reservations` (money held by running workers).
+- Caps: the wizard sets task, project and monthly caps. Task = whole life of the task; project and month reset each UTC month. Without a monthly cap no billable run starts.
+- Starting a run holds its per-run budget; if the month, project, task or credit balance cannot cover it you get HTTP 409 saying which ceiling, how much is left and what you asked for. The hold is given back when the run ends, however it ends.
+- 70 % of a cap: information; 90 %: alert (the run log marks `checkpoint_requested`); 100 %: the worker is stopped, the worktree is kept, the task becomes **PAUSED_BUDGET** and nothing more is spent without you.
+- Your five choices for a PAUSED_BUDGET task: `POST /api/tasks/{id}/budget-action` with `add_budget` (amount_usd, raises this task's cap), `resume_no_increase` (checks the headroom after you fixed an accounting error), `reassign_model` (cheaper model), `defer` (wait for next month), `cancel` (keeps the work). Then resume with `POST /api/tasks/{id}/resume`; the earlier spend still counts.
+- Other tools: `POST /api/budget/top-up {scope: month|project|task, ref, amount_usd}`, `PUT /api/budget/credit-balance {balance_usd}` (Anthropic does not expose your credit; CPM shows entered balance minus spend since), `POST /api/budget/reconcile {actual_usd, period?}` (type the Console figure; the month then shows "reconciled"), `GET/PUT /api/budget/prices` (appends a new price version; check the prices at each release).
+- Limits: no daily cap yet, no automatic Console reconciliation, SDK `max_budget_usd` is only a backstop. Auto-reload of credits is never used.
+- After pulling this version restart CPM: the database migrates to revision 0003 by itself.
 
 ## What exists in v0.1.0 (skeleton)
 Only the skeleton: `/health`, database with all core tables, migrations, redacted logging. No API key is needed or read. The UI, security middleware and key wizard come in later work packages (PLAN.md WP2+).
