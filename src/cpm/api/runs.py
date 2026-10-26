@@ -103,7 +103,7 @@ def resume_task(request: Request, task_id: int, body: StartIn | None = None) -> 
 def delete_worktree(request: Request, task_id: int) -> dict[str, Any]:
     """Delete the task's worktree only if it is clean and holds no unmerged commits."""
     sup = _sup(request)
-    if sup.live_run_for_task(task_id) is not None:
+    if sup.busy(task_id):
         raise HTTPException(409, "the task has a running worker")
     task = sup.tasks.get(task_id)
     with Session(sup.engine) as s:

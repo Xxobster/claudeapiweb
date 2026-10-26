@@ -8,6 +8,7 @@ in explicitly by the caller (T-12).
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess  # noqa: S404 (argument lists only, see tests/security/test_injection.py)
@@ -16,6 +17,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
+log = logging.getLogger("cpm.workers")
 
 
 class _WinJob:
@@ -89,8 +91,8 @@ class _WinJob:
         if not self._k32.AssignProcessToJobObject(self._job, int(popen._handle)):  # type: ignore[attr-defined]
             raise OSError("AssignProcessToJobObject failed")
 
-    def terminate(self) -> None:
-        self._k32.TerminateJobObject(self._job, 1)
+    def terminate(self) -> bool:
+        return bool(self._job and self._k32.TerminateJobObject(self._job, 1))
 
     def close(self) -> None:
         if self._job:
@@ -102,15 +104,25 @@ class ProcessTree:
     def __init__(self, popen: subprocess.Popen[bytes], job: _WinJob | None) -> None:
         self.popen = popen
         self._job = job
+        self._closed = False
 
     @property
     def pid(self) -> int:
         return self.popen.pid
 
     def kill(self) -> None:
-        """Kill the child and every descendant. Safe to call twice and after the child exited."""
+        """Kill the child and every descendant. Safe to call twice and after the child exited.
+
+        After `close()` it does nothing: the pid (POSIX process group) may belong to someone else
+        by then, e.g. when a pause timer fires after the worker already ended.
+        """
+        if self._closed:
+            return
         if self._job is not None:
-            self._job.terminate()
+            if not self._job.terminate():
+                log.warning(
+                    "TerminateJobObject failed for pid %s; killing the child only", self.pid
+                )
         elif not IS_WINDOWS:
             try:
                 os.killpg(self.popen.pid, signal.SIGKILL)  # group id == pid (new session)
@@ -122,6 +134,7 @@ class ProcessTree:
             pass
 
     def close(self) -> None:
+        self._closed = True
         if self._job is not None:
             self._job.close()
             self._job = None

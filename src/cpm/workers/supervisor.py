@@ -17,6 +17,7 @@ import logging
 import sys
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -32,6 +33,7 @@ from cpm.db.settings_repo import get_setting
 from cpm.discovery.gitinfo import _filter_overrides
 from cpm.discovery.policy import worker_policy
 from cpm.security.childenv import build_child_env, build_mock_env, git_config_env
+from cpm.security.paths import PathPolicyError, resolve_in_any
 from cpm.security.redaction import redact, register_secret
 from cpm.security.secrets_store import ANTHROPIC_KEY, SecretStore, SecretStoreUnavailable
 from cpm.tasks.service import IllegalTransition, TaskService
@@ -46,6 +48,7 @@ log = logging.getLogger("cpm.workers")
 ACTOR = "worker-supervisor"
 _MICRO = Decimal(1_000_000)
 MAX_LIVE = 8
+MAX_LINE = 1_000_000  # one worker output line; longer ones are dropped (memory bound)
 RUN_ENDED = (
     "SUCCEEDED",
     "FAILED",
@@ -150,6 +153,22 @@ def _snapshot(s: Session, r: Run) -> RunInfo:
     )
 
 
+def _lines(stream: IO[bytes]) -> Iterator[bytes | None]:
+    """Lines of at most MAX_LINE bytes; an oversized line is skipped to its end (yields None)."""
+    while True:
+        raw = stream.readline(MAX_LINE + 1)
+        if not raw:
+            return
+        if len(raw) > MAX_LINE and not raw.endswith(b"\n"):
+            while True:
+                rest = stream.readline(MAX_LINE)
+                if not rest or rest.endswith(b"\n"):
+                    break
+            yield None
+            continue
+        yield raw
+
+
 class RunSupervisor:
     def __init__(
         self,
@@ -197,7 +216,7 @@ class RunSupervisor:
             return next((r for r, lv in self._live.items() if lv.task_id == task_id), None)
 
     # ----------------------------------------------------------------------- start
-    def _live_gates(self, max_budget_microusd: int | None) -> tuple[str, int]:
+    def _live_gates(self, task_id: int, max_budget_microusd: int | None) -> tuple[str, int]:
         """All conditions for an API-billed run. Returns (api key, per-run cap in micro-USD)."""
         if not self.settings.allow_live_runs:
             raise LiveRunNotAllowed("live runs are off (start CPM with CPM_ALLOW_LIVE_RUNS=1)")
@@ -218,6 +237,22 @@ class RunSupervisor:
         if max_budget_microusd > min(ceilings):
             raise RunRefused(
                 f"per-run budget {max_budget_microusd} exceeds the allowed ceiling {min(ceilings)}"
+            )
+        # Retries and resumes must not multiply the cap: all runs of a task share one ceiling.
+        with Session(self.engine) as s:
+            spent = int(
+                s.scalar(
+                    select(func.coalesce(func.sum(UsageEvent.cost_microusd), 0)).where(
+                        UsageEvent.task_id == task_id
+                    )
+                )
+                or 0
+            )
+        remaining = min(ceilings) - spent
+        if max_budget_microusd > remaining:
+            raise RunRefused(
+                f"task budget left is {max(remaining, 0)} micro-USD ({spent} already spent "
+                f"of {min(ceilings)}); lower the per-run budget or raise the task budget"
             )
         return key, max_budget_microusd
 
@@ -253,6 +288,16 @@ class RunSupervisor:
         finally:
             with self._lock:
                 self._starting.discard(task_id)
+
+    def busy(self, task_id: int) -> bool:
+        """A worker is running or being launched for this task."""
+        with self._lock:
+            return self.live_run_for_task(task_id) is not None or task_id in self._starting
+
+    def _task_status(self, task_id: int) -> str | None:
+        with Session(self.engine) as s:
+            t = s.get(Task, task_id)
+            return t.status if t else None
 
     def _max_parallel(self) -> int:
         cfg = get_setting(self.engine, "wizard.config") or {}
@@ -294,7 +339,7 @@ class RunSupervisor:
         key: str | None = None
         cap: int | None = max_budget_microusd
         if billing == "api":
-            key, cap = self._live_gates(max_budget_microusd)
+            key, cap = self._live_gates(task_id, max_budget_microusd)
             register_secret(key)  # exact-match redaction of the key everywhere, logs included
             if scenario != "success" or scenario_args:
                 raise RunRefused("scenarios exist only for mock tasks")
@@ -309,6 +354,12 @@ class RunSupervisor:
             raise RunRefused("CLI/subscription mode is an interface stub in v1 (DECISIONS Q9)")
 
         data = self.tasks.get(task_id)
+        try:  # the stored path is re-checked at use time (moved, replaced by a junction, revoked)
+            project_path = resolve_in_any(
+                get_setting(self.engine, "approved_roots", []) or [], project_path
+            )
+        except PathPolicyError as exc:
+            raise RunRefused(f"project path is not inside an approved root: {exc}") from exc
         try:
             wt = self.worktrees.ensure(project_path, slug, task_id, title)
         except WorktreeError as exc:
@@ -378,6 +429,9 @@ class RunSupervisor:
             branch=wt.branch,
         )
 
+        if self._task_status(task_id) != "RUNNING":  # cancelled while we were preparing
+            self._finish_rows(run_id, task_id, "CANCELLED", None, "task changed before launch")
+            raise RunError("the task was stopped before the worker started")
         argv = [self.python, "-I", "-m", "cpm.workers.run", "--spec", str(spec_path)]
         try:
             tree = proctree.spawn(argv, env, run_dir)
@@ -401,6 +455,9 @@ class RunSupervisor:
         )
         with self._lock:
             self._live[run_id] = live
+        if self._task_status(task_id) != "RUNNING":  # cancel API raced with the spawn
+            live.intent = "cancel"
+            tree.kill()
         with Session(self.engine) as s:
             r = s.get(Run, run_id)
             assert r is not None  # noqa: S101
@@ -507,8 +564,11 @@ class RunSupervisor:
 
     def _read_stdout(self, live: _Live) -> None:
         stream: IO[bytes] = live.tree.popen.stdout  # type: ignore[assignment]
-        for raw in iter(stream.readline, b""):
+        for raw in _lines(stream):
             live.last_event = time.monotonic()
+            if raw is None:
+                live.log.append("warning", text="oversized output line dropped")
+                continue
             line = raw.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
@@ -523,7 +583,9 @@ class RunSupervisor:
 
     def _read_stderr(self, live: _Live) -> None:
         stream: IO[bytes] = live.tree.popen.stderr  # type: ignore[assignment]
-        for raw in iter(stream.readline, b""):
+        for raw in _lines(stream):
+            if raw is None:
+                continue
             text = raw.decode("utf-8", errors="replace").rstrip()
             if text:
                 live.log.append("stderr", text=text)

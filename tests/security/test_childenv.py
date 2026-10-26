@@ -17,7 +17,12 @@ PARENT = {
 
 def test_child_env_is_allowlist_with_single_credential():
     env = build_child_env("api", "sk-ant-new", PARENT)
-    assert env == {"PATH": "/bin", "HOME": "/h", "ANTHROPIC_API_KEY": "sk-ant-new"}
+    assert env == {
+        "PATH": "/bin",
+        "HOME": "/h",
+        "ANTHROPIC_API_KEY": "sk-ant-new",
+        "NoDefaultCurrentDirectoryInExePath": "1",
+    }
 
 
 def test_no_key_no_env():
