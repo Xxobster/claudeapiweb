@@ -168,7 +168,7 @@ try {
     commands: [{ name: "tts", program: "tts.exe", prefix: [], flags: { "--out": "out_path" }, positional: "none", needs_trust: false, description: "speak" }],
     validators: [{ kind: "files_exist", params: { glob: "a/*.wav" }, severity: "error" }],
     artifacts: { asset_paths: ["assets/voice/"], extensions: [".wav"], binary_extensions: [".wav"], max_file_bytes: 5000000, binary_policy: "ask" },
-    report: { required_sections: ["Summary"], max_chars: 20000 }, task_template: {}, required: { tools: {}, paths: {} }, problems: ["required tool 'tts' not found at C:\\x"] }] };
+    report: { required_sections: ["Summary"], max_chars: 20000 }, task_template: { title_prefix: "[voice] ", description: "Speak a script.", required_inputs: ["script_file"], default_acceptance: ["wav exists"] }, required: { tools: {}, paths: {} }, problems: ["required tool 'tts' not found at C:\\x"] }] };
   await a.route(`**/api/projects/${alphaId}/lanes`, (r) => r.fulfill({ json: laneBody }));
   await a.goto(`${base}/#/project/${alphaId}/lanes`);
   await a.waitForSelector("[data-lane='voice'] >> text=Allowed commands");
@@ -176,6 +176,15 @@ try {
   await a.waitForSelector("[data-lane='voice'] >> text=stop and ask a person for each binary");
   await a.waitForSelector("[data-lane='voice'] >> text=The final answer must contain: Summary");
   const lt = await post(`/api/projects/${alphaId}/tasks`, { title: "no lane task", billing_mode: "mock" });
+  let laneReq = null;
+  await a.route(`**/api/projects/${alphaId}/lanes/voice/tasks`, async (r) => { laneReq = r.request().postDataJSON(); await r.fulfill({ status: 201, json: { id: lt.id } }); });
+  await a.fill("[data-lane='voice'] .lt-title", "line one");
+  await a.fill("[data-lane='voice'] [data-input='script_file']", "scripts/a.txt");
+  await a.click("[data-lane='voice'] >> text=Create task in BACKLOG");
+  await a.waitForFunction(() => (id) => location.hash === `#/task/${id}`, lt.id);
+  assert.deepEqual(laneReq, { title: "line one", priority: 100, billing_mode: "mock", inputs: { script_file: "scripts/a.txt" } });
+  await a.unroute(`**/api/projects/${alphaId}/lanes/voice/tasks`);
+  await a.goto(`${base}/#/projects`);
   await a.goto(`${base}/#/task/${lt.id}`);
   await a.waitForSelector("text=No description.");
   assert.equal(await a.locator("#task-lane").count(), 0, "a task without a lane has no lane box");
