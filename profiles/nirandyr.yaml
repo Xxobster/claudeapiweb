@@ -15,8 +15,15 @@ task_sources:
 external_locks:
   job_board: docs/JOB_BOARD.md      # read-only in v1
   devlock: tools/devices/devlock.py
-  build_lock: 'D:\projects\game-build\BUILD_RUNNING.lock'
   gpu_lock: tools/gpu_lock.sh
+# Rule 26: while any of these exists, no heavy PC work starts (Unity batch, Blender, GPU, devices).
+lock_files:
+  build_running: 'D:\projects\game-build\BUILD_RUNNING.lock'
+  # Location NOT verified on the PC yet (WP6 open item): assumed next to BUILD_RUNNING.lock.
+  blender_running: 'D:\projects\game-build\BLENDER_RUNNING.lock'
+lock_dirs:
+  # tools/gpu_lock.sh writes <tool>-<pid>.lock here (voice and art GPU jobs use it, rules 26/49).
+  gpu_locks: 'D:\projects\gpu-locks'
 heavy_resources: [unity_editor, gpu, blender, device]
 default_effort: medium
 pr_body_must_list: [files_changed, security_findings, exploit_findings, what_needs_pc]

@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.8.0)
+# USER_GUIDE (v0.9.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -41,14 +41,31 @@ All calls need the install token and CSRF header (see Security basics). A projec
 ## Workers and runs (v0.5.1, API only; the live log screen comes with the UI work package)
 A run is one worker process for one task. It works in its own git worktree under `D:\projects\cpm-worktrees\<project>\task-<id>` on branch `claude/cpm-task-<id>-<title>`; your project folder is never written. The scheduler (WP7) will start runs by itself; until then you start them by hand.
 - Start: `POST /api/tasks/{id}/runs`. The task must be READY (or PAUSED to resume). Tasks with `billing_mode: "mock"` run a scripted fake worker (no key, no money): body `{"scenario": "success|fail|hang|crash|budget_burst|grandchild|slow"}`.
-- Live log: `GET /api/runs/{run}/events?since=<seq>` (polling) or the WebSocket `/api/runs/{run}/stream?since=<seq>` (needs the token header and an allowed Origin). Events are redacted and size-capped; `data\runs\<run>\events.jsonl` is the same log on disk.
+- Live log: `GET /api/runs/{run}/events?since=<seq>` (polling) or the WebSocket `/api/runs/{run}/stream?since=<seq>` (needs an allowed Origin plus the token header, or a one-time `?ticket=` from `POST /api/ws-ticket`). Events are redacted and size-capped; `data\runs\<run>\events.jsonl` is the same log on disk.
 - Stop: `POST /api/runs/{run}/stop` (or cancel the task) kills the worker and everything it started; the task becomes CANCELLED. Pause: `POST /api/runs/{run}/pause` (or move the task to PAUSED) asks the worker to stop, then kills it after 3 s; `POST /api/tasks/{id}/resume` continues the same session in the same worktree.
 - A worker that finishes successfully moves its task to **TESTING**, not COMPLETED: only the acceptance gate (WP10) can complete a task. A crash, a silent hang (no heartbeat for 60 s) or a run over its time limit makes the task FAILED; retry with FAILED -> READY, the worktree and its files are kept. Work is never deleted automatically: `DELETE /api/tasks/{id}/worktree` refuses while the worktree has uncommitted changes or commits that are not merged anywhere else.
 - **Real (API-billed) runs need all of these**: start CPM with `CPM_ALLOW_LIVE_RUNS=1`, finish the wizard (budget cap + key), install the SDK with `pip install -e ".[sdk]"`, and send `max_budget_microusd` with the start request (at most the task budget and at most `CPM_LIVE_RUN_MAX_MICROUSD`, default 2 000 000 = 2 USD, the approved first live test). All runs of one task (retries, resumes) share that ceiling: a new run is refused if the task has already spent too much. A project whose folder is no longer inside an approved root cannot start workers. The run stops by itself when the estimated spend reaches that cap (task becomes PAUSED_BUDGET). Do this only after you decide to run the first live test.
 - Untrusted projects: the worker may edit files in its worktree and read the project, but cannot run tests or linters (they execute repository code); trust the project first to allow `python -m pytest|ruff|mypy`. Workers can never push, fetch, use the network, or touch `.git`, `.claude` or `.mcp.json`.
 - Limits: `max_parallel_agents` from the wizard (default 3, hard maximum 8) counts running workers. Settings: `CPM_WORKTREE_ROOT` (default: `cpm-worktrees` next to the CPM folder, never inside OneDrive or inside the managed project).
 
-## Budget and cost center (v0.8.0, API only; the screen comes with the UI work package)
+## Reservations, Desktop claims and locks (v0.8.0)
+- Before a worker starts, its task reserves what it will touch: its declared scope (files or folders; a folder blocks everything below it) and, for heavy lanes, `unity_editor`, `gpu`, `blender` or a device. Two tasks that overlap cannot run together; the second stays READY and shows why, for example: `blocked by: task #4 holds path src/ (needed src/a.py)` or `blocked by: Desktop claim on Assets/Game/UI/`. See it with `GET /api/tasks/{id}/conflicts`.
+- **Tell CPM what Claude Desktop is editing**: `POST /api/projects/{id}/desktop-claims` with `{"path": "Assets/Game/UI/", "note": "menu rework", "expires_in_s": 7200}`; release with `DELETE /api/desktop-claims/{claim}`. A claim blocks CPM tasks that want to write there (reading is fine) and never stops a worker already running: the answer lists the tasks that already hold the path so you can pause them.
+- **Heavy work waits**: while `BUILD_RUNNING.lock`, `BLENDER_RUNNING.lock` or a file in the gpu-lock folder exists, no heavy task starts; light tasks continue. At most one heavy task runs at a time. `GET /api/projects/{id}/locks` shows the state of these locks, the job board claims and the device locks (read-only).
+- **Edits made outside CPM**: `POST /api/projects/{id}/external-scan` compares the project folder with the previous scan (first call = baseline) and lists which reserved paths were changed behind CPM's back. Nothing is overwritten or reverted. A stuck reservation can be released with `POST /api/tasks/{id}/reservations/release` (refused while a worker is running).
+- Needs the PC once: confirm the real location of `BLENDER_RUNNING.lock` and share one real `docs/JOB_BOARD.md` (see DECISIONS 2026-10-26 WP6).
+## The web interface (v0.7.0)
+Start CPM with `scripts\start.ps1`: it opens `http://127.0.0.1:8765/` already signed in (the token travels in the address fragment and is removed from the bar). If a tab asks for the token, paste the output of `scripts\show_token.ps1`. "Lock" (top right) forgets the token in this browser; the pill next to it shows whether CPM is reachable.
+- **Settings**: save/test/remove the Anthropic key (never shown again) and the first-run setup (folder, caps, parallel agents). No billed run is possible without a key and a monthly cap.
+- **Projects**: add a folder (read-only registration). Each project has a Board (one column per status, refreshes by itself), a Table, "Sources & trust" and "Add tasks" (new task or TODO checklist import).
+- **Trust**: until you trust a project, its workers do not load its CLAUDE.md, hooks, MCP servers or skills. Trust it only after looking at the repository, because its scripts then run on this PC.
+- **Task page**: move it between states, start a run (mock tasks pick a scenario; API tasks need a per-run budget), pause/resume/cancel, and follow the worker's log live. A finished worker leaves the task in TESTING.
+- **Agents**: workers running now across projects. **Costs**: caps from setup and recorded spend (estimate vs reconciled). **Git & review**: branch state per project; diffs and PRs arrive later.
+- Open two tabs on two projects at once; each follows its own runs.
+- Check the UI yourself: `node tests/ui/e2e.mjs` (Node + Playwright installed; uses mock runs only).
+- After pulling this version re-run `scripts\setup.ps1` (new dependency `websockets`).
+
+## Budget and cost center (v0.9.0, API only; the screen comes with the UI work package)
 CPM keeps one ledger of every message's cost and refuses to start a run that would not fit. Every number is an **estimate** (token counts times the price table) until you reconcile it with the Console.
 - Where you see it: `GET /api/budget` (month, per project, held money, level 0/70/90/100, credit balance), `GET /api/tasks/{id}/budget`, `GET /api/budget/reservations` (money held by running workers).
 - Caps: the wizard sets task, project and monthly caps. Task = whole life of the task; project and month reset each UTC month. Without a monthly cap no billable run starts.
@@ -57,7 +74,7 @@ CPM keeps one ledger of every message's cost and refuses to start a run that wou
 - Your five choices for a PAUSED_BUDGET task: `POST /api/tasks/{id}/budget-action` with `add_budget` (amount_usd, raises this task's cap), `resume_no_increase` (checks the headroom after you fixed an accounting error), `reassign_model` (cheaper model), `defer` (wait for next month), `cancel` (keeps the work). Then resume with `POST /api/tasks/{id}/resume`; the earlier spend still counts.
 - Other tools: `POST /api/budget/top-up {scope: month|project|task, ref, amount_usd}`, `PUT /api/budget/credit-balance {balance_usd}` (Anthropic does not expose your credit; CPM shows entered balance minus spend since), `POST /api/budget/reconcile {actual_usd, period?}` (type the Console figure; the month then shows "reconciled"), `GET/PUT /api/budget/prices` (appends a new price version; check the prices at each release).
 - Limits: no daily cap yet, no automatic Console reconciliation, SDK `max_budget_usd` is only a backstop. Auto-reload of credits is never used.
-- After pulling this version restart CPM: the database migrates to revision 0003 by itself.
+- After pulling this version restart CPM: the database migrates to revision 0004 by itself.
 
 ## What exists in v0.1.0 (skeleton)
 Only the skeleton: `/health`, database with all core tables, migrations, redacted logging. No API key is needed or read. The UI, security middleware and key wizard come in later work packages (PLAN.md WP2+).
