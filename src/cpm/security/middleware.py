@@ -24,6 +24,28 @@ TOKEN_HEADER = b"x-cpm-token"
 CSRF_HEADER = b"x-cpm-csrf"
 
 
+HARDENING_HEADERS = (
+    (b"cache-control", b"no-store"),
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"no-referrer"),
+)
+
+
+def _with_hardening(send: Send) -> Send:
+    """Add no-store / anti-framing / nosniff headers to every response (clickjacking, caching)."""
+
+    async def wrapped(message: MutableMapping[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            headers = list(message.get("headers", []))
+            present = {k.lower() for k, _ in headers}
+            headers += [(k, v) for k, v in HARDENING_HEADERS if k not in present]
+            message = {**message, "headers": headers}
+        await send(message)
+
+    return wrapped
+
+
 def allowed_hosts(port: int) -> frozenset[str]:
     return frozenset({f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"})
 
@@ -43,7 +65,8 @@ class SecurityMiddleware:
         headers = {k.lower(): v for k, v in scope["headers"]}
         reason = self._check(scope, headers)
         if reason is None:
-            await self.app(scope, receive, send)
+            out = _with_hardening(send) if scope["type"] == "http" else send
+            await self.app(scope, receive, out)
             return
         status, code = reason
         if scope["type"] == "websocket":
@@ -54,10 +77,7 @@ class SecurityMiddleware:
             {
                 "type": "http.response.start",
                 "status": status,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"cache-control", b"no-store"),
-                ],
+                "headers": [(b"content-type", b"application/json"), *HARDENING_HEADERS],
             }
         )
         await send({"type": "http.response.body", "body": body})
