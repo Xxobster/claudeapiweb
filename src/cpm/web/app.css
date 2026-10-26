@@ -34,4 +34,8 @@ pre.log{background:#0b0e14;color:#d6deeb;padding:.6rem;border-radius:6px;max-hei
 .note{border-left:4px solid var(--accent);padding:.4rem .8rem;background:var(--card);margin:.6rem 0}
 .note.warn{border-color:var(--warn)}
 .empty{padding:1.5rem;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:8px}
+.meter{position:relative;height:.8rem;border:1px solid var(--line);border-radius:999px;background:var(--bg);overflow:hidden;margin:.5rem 0}
+.meter .fill{height:100%;background:var(--ok)}.meter.mid .fill{background:var(--warn)}.meter.high .fill{background:var(--warn)}.meter.bad .fill{background:var(--bad)}
+.meter .mark{position:absolute;top:0;bottom:0;width:1px;background:var(--muted)}
+h3{font-size:.95rem;margin:.8rem 0 .3rem}
 @media (max-width:600px){main{padding:.6rem}}

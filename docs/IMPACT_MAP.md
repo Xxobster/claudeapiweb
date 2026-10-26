@@ -1,4 +1,4 @@
-# IMPACT_MAP (WP8, v0.9.0, 2026-10-26)
+# IMPACT_MAP (WP15b, v0.10.0, 2026-10-26)
 
 Rule: before editing a module, read its row; after editing, update the row, the chains and the change log (CLAUDE.md rules 2 and 22). Modules marked (built) exist in code; the others describe the planned design (ARCHITECTURE.md).
 
@@ -103,13 +103,22 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 ## 2e. WP15 notes (web UI)
 - The UI is a static, build-less SPA served by FastAPI (`/` + `/ui/*`, public but Host/Origin-checked). It calls only `/api/*` with `X-CPM-Token`; mutations add `X-CPM-CSRF` from `/api/session`. Live logs: `POST /api/ws-ticket {run_id}` then `ws://.../api/runs/{id}/stream?ticket=...&since=n`.
 - Consequence: any new API field shown in the UI must be added to `app.js`; any new endpoint stays token-protected by default (only `/health`, `/`, `/ui/*` are public: `security/middleware.py` `PUBLIC_PATHS`/`UI_PREFIX`).
-- Dashboard data is `GET /api/dashboard` (task counts per project, live workers, spend split estimated/reconciled). WP6-WP8 (reservations, scheduler, budget admission) should add their own endpoints; the Costs and Git pages already carry a "arrives with ..." note that must be replaced then (no fake numbers). Hook points: `costsView()` (budget caps, thresholds, PAUSED_BUDGET options), `agentsView()` (reservations/conflicts), `gitView()` (diff/review, WP10).
+- Dashboard data is `GET /api/dashboard` (task counts per project, live workers, spend split estimated/reconciled). WP6-WP8 (reservations, scheduler, budget admission) should add their own endpoints; Costs and Agents are wired (v0.10.0, see below). The Git page still carries its "arrives with ..." note (WP10); the scheduler screen is not built (WP7). Hook points left: `gitView()` (diff/review, WP10).
 - The UI must never use `innerHTML`, inline script/style or a remote asset (CSP + test). Browser tabs share the token via localStorage.
 - `websockets` is now a runtime dependency (uvicorn's WebSocket support); the lock was regenerated.
+
+## 2g. WP15b notes (cost center and reservations in the UI, v0.10.0)
+- Consumers (a renamed field breaks the screen; `tests/ui/e2e.mjs` steps 6b-6d are the check): `GET /api/budget` (`month.*`, `projects[]`, `credit_balance`, `limitations`), `/api/budget/{prices,reservations}`, `POST /api/budget/{top-up,reconcile}`, `PUT/DELETE /api/budget/credit-balance`, `GET /api/tasks/{id}/budget`, `POST /api/tasks/{id}/budget-action`; `GET /api/projects/{id}/{reservations,desktop-claims,locks}`, `GET /api/tasks/{id}/conflicts`, `POST .../external-scan`, `POST /api/tasks/{id}/reservations/release`, claim add/delete.
+- `app.js`: `costsView`, `budgetActions` (task page), `conflictsBox` (task page), `resourcesPane` + `agentsView`, `lockDetail` (reads the adapter `status()` shapes: lock_file, lock_dir, devlock, job_board; a new adapter kind needs a branch there). Resume is offered for PAUSED_BUDGET too.
+- No backend change, no migration. The monthly cap stays in the wizard form (Settings); the Costs page only adds to it (top-up), so there is one place that sets the base cap.
+- The CSP forbids `style` attributes: dynamic widths are set through CSSOM (`el.style.x`), never `h(..., {style})`. Found by the e2e console check.
+- Every spend-raising button (`Add to cap`, `Add budget`) asks for a browser confirmation: the click is the explicit authorisation (rule 7).
+- Open: the scheduler screen waits for WP7; the live 90 % checkpoint message is still WP10; the 3 s refresh of Agents pauses while a form field has focus.
 
 ## 4. Change log
 | Date | Version | Change | By |
 |---|---|---|---|
+| 2026-10-26 | 0.10.0 | WP15b: Costs page (month meter with 70/90/100 marks, top-up, per-project, prices, credit balance, reconcile), PAUSED_BUDGET choices and per-task budget on the task page, Agents page with budget holds, reservations, Desktop claims, external locks and outside-edit scan, "blocked by" box with manual release; UI + e2e + docs only, no migration | CPM Code thread (WP15b) |
 | 2026-10-26 | 0.9.0 | WP8: versioned price table (replaces `workers/estimate.py`), usage ledger with price version, atomic budget admission (`BEGIN IMMEDIATE`, month/project/task/credit ceilings), reservations released on every run end, 70/90/100 % threshold events, PAUSED_BUDGET resume + five options, manual credit balance and reconciliation, `/api/budget*` and `/api/tasks/{id}/budget(-action)`; migration 0004 (touches `db/models`, `workers/{supervisor,providers}`, `api/{app,runs}`; removes `workers/estimate.py`) | CPM Code thread (WP8) |
 | 2026-10-26 | 0.7.0 | WP15: web UI (dashboard, projects, Kanban + table, task page with live log, agent monitor, costs, git/review placeholder, settings/wizard, workspace-trust explanation), one-time WebSocket tickets (T-27 closed), CSP + static serving, `/api/dashboard`, `websockets` dependency, `start.ps1` opens the UI with the token fragment; no migration | CPM Code thread (WP15) |
 | 2026-10-26 | 0.8.0 | WP6: reservations (atomic multi-resource, prefix semantics, leases/heartbeat/expiry with liveness check, heavy=1 class), path normalisation (case, slashes, `..`, symlinks/junctions, `.meta`, 8.3), Desktop claims, read-only external lock adapters (build/blender lock files, gpu-lock folder, job board, devlock listing + `wrap_command`), admission (`READY -> RESERVED`, one visible blocker reason), main-tree change detection via git snapshots, `/api/*` routes in `api/locks.py`, profile fields `lock_files`/`lock_dirs`, migration 0003 (touches `db/models`, `profiles`, `profiles/nirandyr.yaml`, `api/app`) | CPM Code thread (WP6) |

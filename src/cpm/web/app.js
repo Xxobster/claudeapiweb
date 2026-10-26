@@ -111,14 +111,56 @@ function agentTable(runs, projects) {
       h("td", null, r.model || "—"), h("td", null, r.billing_mode), h("td", null, r.status), h("td", null, when(r.heartbeat_at))))));
 }
 
+function lockDetail(l) {
+  if (l.kind === "lock_file") return l.active ? `${l.file}, ${l.age_s ?? "?"} s old` : l.file;
+  if (l.kind === "lock_dir") return l.unreadable ? "folder unreadable: treated as held" : (l.files || []).join(", ");
+  if (l.kind === "devlock") return (l.held || []).map((x) => x.file).join(", ");
+  if (l.kind === "job_board") return l.problem || (l.claims || []).map((c) => `${c.path} (${c.owner || "?"})`).join(", ");
+  return "";
+}
+
+// Reservations, Desktop claims and the managed project's own locks (WP6). Read-only except claim add/release.
+async function resourcesPane(project, onDone) {
+  const [res, claims, locks] = await Promise.all([api.get(`/api/projects/${project.id}/reservations`), api.get(`/api/projects/${project.id}/desktop-claims`), api.get(`/api/projects/${project.id}/locks`)]);
+  const path = h("input", { id: `claim-path-${project.id}`, placeholder: "path in the project, e.g. Assets/Game/UI/", size: 36 });
+  const note = h("input", { id: `claim-note-${project.id}`, placeholder: "note (optional)", size: 24 });
+  const scanOut = h("div", { class: "muted", role: "status" });
+  return h("div", { class: "card", "data-project": project.id },
+    h("h2", null, project.name),
+    h("h3", null, "Reserved by tasks"),
+    res.reservations.length ? h("table", null, h("thead", null, h("tr", null, ["Task", "Resource", "Mode", "Last heartbeat", "Lease until"].map((t) => h("th", null, t)))),
+      h("tbody", null, res.reservations.map((r) => h("tr", null, h("td", null, link(`#/task/${r.task_id}`, `#${r.task_id}`)), h("td", null, r.label || `${r.type}: ${r.key}`), h("td", null, r.mode), h("td", null, when(r.heartbeat_at)), h("td", null, when(r.lease_expires_at)))))) : h("p", { class: "muted" }, "Nothing reserved."),
+    h("h3", null, "Claimed by you in Claude Desktop"),
+    claims.claims.length ? h("table", null, h("thead", null, h("tr", null, ["Path", "Note", "Expires", ""].map((t) => h("th", null, t)))),
+      h("tbody", null, claims.claims.map((c) => h("tr", null, h("td", null, c.path), h("td", null, c.note || "—"), h("td", null, c.expires_at ? when(c.expires_at) : "never"), h("td", null, h("button", { onclick: () => act(() => api.del(`/api/desktop-claims/${c.id}`), onDone) }, "Release")))))) : h("p", { class: "muted" }, "No claim. Workers will not touch a path you claim."),
+    h("form", { class: "row", onsubmit: (e) => {
+      e.preventDefault();
+      let made = null;  // the list endpoint never carries affected_tasks, only the creation answer does
+      act(async () => { made = await api.post(`/api/projects/${project.id}/desktop-claims`, { path: path.value, note: note.value }); }, async () => {
+        await onDone();
+        if (made && made.affected_tasks.length) setBanner(`Claim added, but task(s) ${made.affected_tasks.map((t) => `#${t}`).join(", ")} already hold this path and keep running. Pause them before you edit it.`, "info");
+      });
+    } }, path, note, h("button", { type: "submit" }, "Claim path")),
+    h("h3", null, "The project's own locks (read-only)"),
+    locks.locks.length ? h("ul", null, locks.locks.map((l) => h("li", null, h("strong", null, l.name), ` ${l.active ? "HELD" : "free"} `, h("span", { class: "muted" }, lockDetail(l))))) : h("p", { class: "muted" }, "No external lock configured for this project."),
+    h("div", { class: "row" }, h("button", { onclick: () => act(async () => { const r = await api.post(`/api/projects/${project.id}/external-scan`); scanOut.textContent = r.conflicts.length ? `${r.conflicts.length} task(s) have reserved paths edited in the main tree: ${r.conflicts.map((c) => `#${c.task_id} (${c.paths.join(", ")})`).join("; ")}` : `${r.changed.length} changed file(s) in the main tree, none on a reserved path.`; }) }, "Scan the main tree for outside edits"), scanOut));
+}
+
 async function agentsView() {
   const my = navToken;
   const draw = async () => {
     const d = await api.get("/api/dashboard");
-    show(my, h("h1", null, "Agent monitor"), d.active_runs.length ? agentTable(d.active_runs, d.projects) : empty("No worker is running."));
+    const holds = await api.get("/api/budget/reservations");
+    const pane = await Promise.all(d.projects.map((p) => resourcesPane(p, () => draw().catch(() => {}))));
+    show(my, h("h1", null, "Agent monitor"), d.active_runs.length ? agentTable(d.active_runs, d.projects) : empty("No worker is running."),
+      h("h2", null, "Budget held by running workers"),
+      holds.length ? h("table", null, h("thead", null, h("tr", null, ["Task", "Run", "Held"].map((t) => h("th", null, t)))), h("tbody", null, holds.map((r) => h("tr", null, h("td", null, link(`#/task/${r.task_id}`, `#${r.task_id}`)), h("td", null, r.run_id ? `#${r.run_id}` : "—"), h("td", null, usd(r.amount_microusd)))))) : h("p", { class: "muted" }, "Nothing held."),
+      h("h1", null, "Reservations and locks"),
+      h("p", { class: "muted" }, "A task only starts when its files, devices and the project's locks are free. Claim a path here to keep workers away from it while you edit it in Claude Desktop."),
+      pane.length ? pane : empty("No project yet."));
   };
   await draw();
-  const t = setInterval(() => draw().catch(() => {}), 3000);
+  const t = setInterval(() => { if (!document.activeElement || !document.activeElement.closest("form")) draw().catch(() => {}); }, 3000);
   onLeave(() => clearInterval(t));
 }
 
@@ -216,6 +258,15 @@ function addPane(id) {
 }
 
 // ---------------------------------------------------------------- task + live monitor
+// Why a task cannot start now (WP6 admission) and the manual release of a stuck reservation.
+function conflictsBox(why, onDone, taskId) {
+  // The release button is always offered: the holder of a stale reservation is not blocked by it, so "no blockers" must not hide it.
+  const release = h("button", { onclick: () => confirm("Release this task's own reservations? Only do this if nothing is working on it.") && act(() => api.post(`/api/tasks/${taskId}/reservations/release`), onDone) }, "Release this task's reservations");
+  if (!why.blockers.length) return h("div", { class: "note", id: "conflicts" }, "No lock or reservation blocks this task right now. ", release);
+  return h("div", { class: "note warn", id: "conflicts" }, h("strong", null, "Blocked by:"),
+    h("ul", null, why.blockers.map((b) => h("li", null, `${b.message}`, b.holder_task_id ? [" (", link(`#/task/${b.holder_task_id}`, `task #${b.holder_task_id}`), ")"] : null))), release);
+}
+
 async function taskView(id) {
   const my = navToken;
   const [task, states, runs] = await Promise.all([api.get(`/api/tasks/${id}`), api.get("/api/task-states"), api.get(`/api/tasks/${id}/runs`)]);
@@ -223,6 +274,9 @@ async function taskView(id) {
   const moves = (states.transitions[task.status] || []).filter((s) => states.user_targets.includes(s));
   const latest = runs.length ? runs[runs.length - 1] : null;
   const live = latest ? (await api.get(`/api/runs/${latest.id}/events?limit=1`)).live : false;
+  const tb = await api.get(`/api/tasks/${id}/budget`);
+  const waiting = ["READY", "RESERVED", "PAUSED", "PAUSED_BUDGET", "BLOCKED"].includes(task.status) && !live;
+  const why = waiting ? await api.get(`/api/tasks/${id}/conflicts`) : null;
 
   const controls = h("div", { class: "row" }, moves.map((s) => h("button", { class: s === "CANCELLED" ? "danger" : "", onclick: () => act(() => api.post(`/api/tasks/${id}/transition`, { to: s }), () => route()) }, `→ ${s}`)));
   const runBox = h("div", { class: "card" }, h("h2", null, "Run"));
@@ -230,7 +284,7 @@ async function taskView(id) {
     runBox.append(h("div", { class: "row" },
       h("button", { onclick: () => act(() => api.post(`/api/runs/${latest.id}/pause`), () => route()) }, "Pause"),
       h("button", { class: "danger", onclick: () => confirm("Kill the worker's process tree now?") && act(() => api.post(`/api/runs/${latest.id}/stop`), () => route()) }, "Cancel run")));
-  } else if (["READY", "PAUSED"].includes(task.status)) {
+  } else if (["READY", "PAUSED", "PAUSED_BUDGET"].includes(task.status)) {
     const scen = h("select", { id: "r-scen" }, ["success", "fail", "slow", "hang", "crash", "budget_burst"].map((s) => h("option", { value: s }, s)));
     const budget = h("input", { id: "r-budget", type: "number", step: "0.01", min: "0.01", placeholder: "USD for this run" });
     const isApi = task.billing_mode === "api";
@@ -240,8 +294,8 @@ async function taskView(id) {
       isApi ? field("Per-run budget (USD)", budget) : field("Mock scenario", scen),
       h("p", null, h("button", { class: "primary", onclick: () => act(() => {
         const body = isApi ? { max_budget_microusd: Math.round(Number(budget.value) * 1e6) } : { scenario: scen.value };
-        return api.post(task.status === "PAUSED" ? `/api/tasks/${id}/resume` : `/api/tasks/${id}/runs`, body);
-      }, () => route()) }, task.status === "PAUSED" ? "Resume" : "Start run")));
+        return api.post(task.status.startsWith("PAUSED") ? `/api/tasks/${id}/resume` : `/api/tasks/${id}/runs`, body);
+      }, () => route()) }, task.status.startsWith("PAUSED") ? "Resume" : "Start run")));
   } else {
     runBox.append(h("p", { class: "muted" }, `No run can start from ${task.status}.`));
   }
@@ -252,6 +306,9 @@ async function taskView(id) {
     h("div", { class: "row" }, statusPill(task.status), `priority ${task.priority} · ${task.billing_mode} · model ${task.model || "default"} · retries ${task.retry_count}`),
     task.block_reason ? h("div", { class: "note warn" }, `Blocked: ${task.block_reason}`) : null,
     trustNote(project),
+    task.status === "PAUSED_BUDGET" ? budgetActions(task, tb.remaining_microusd, () => route()) : null,
+    h("div", { class: "card", id: "task-budget" }, h("strong", null, "Budget "), `spent ${usd(tb.spent_microusd)}`, tb.cap_microusd != null ? ` of ${usd(tb.cap_microusd)} (left ${usd(tb.remaining_microusd)})` : " (no task cap)", h("span", { class: "muted" }, ` · ${tb.label}`)),
+    why ? conflictsBox(why, () => route(), id) : null,
     h("div", { class: "card" }, h("p", null, task.description || "No description."), h("h2", null, "Acceptance"), task.acceptance.length ? h("ul", null, task.acceptance.map((a) => h("li", null, a))) : h("p", { class: "muted" }, "None."), h("h2", null, "Declared scope"), task.declared_scope.length ? h("ul", null, task.declared_scope.map((a) => h("li", null, a))) : h("p", { class: "muted" }, "None.")),
     h("h2", null, "Move this task"), moves.length ? controls : h("p", { class: "muted" }, "No move is available to you from this state."),
     runBox,
@@ -299,16 +356,79 @@ function streamRun(runId, logBox, stateEl, refreshTask) {
 }
 
 // ---------------------------------------------------------------- costs / git / settings
+const LEVEL_TEXT = { 0: "below 70 %: nothing to report", 70: "70 % reached: information only", 90: "90 % reached: alert; a worker is asked for a short checkpoint while budget remains", 100: "100 % reached: no new run starts and running tasks pause as PAUSED_BUDGET" };
+const meterClass = (pct) => (pct == null ? "" : pct >= 100 ? "bad" : pct >= 90 ? "high" : pct >= 70 ? "mid" : "");
+function meter(pct) {
+  const w = pct == null ? 0 : Math.min(pct, 100);
+  const at = (el, left) => { el.style.left = `${left}%`; return el; };  // CSSOM, not a style attribute: the CSP forbids those
+  const fill = h("div", { class: "fill" });
+  fill.style.width = `${w}%`;
+  return h("div", { class: `meter ${meterClass(pct)}`, role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(w), "aria-label": "Budget used" },
+    fill, at(h("i", { class: "mark" }), 70), at(h("i", { class: "mark" }), 90));
+}
+const pctText = (pct) => (pct == null ? "no cap" : `${pct} %`);
+
+// PAUSED_BUDGET: the five choices of MASTER_PROMPT section 12. None of them starts a worker; "Resume" does, through admission.
+function budgetActions(task, headroom, onDone) {
+  const amount = h("input", { id: "b-amount", type: "number", step: "0.01", min: "0.01", placeholder: "USD to add" });
+  const model = h("select", { id: "b-model" }, ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"].map((m) => h("option", { value: m, selected: m === task.model }, m)));
+  const run = (body) => act(() => api.post(`/api/tasks/${task.id}/budget-action`, body), onDone);
+  return h("div", { class: "card", id: "budget-actions" },
+    h("h2", null, "This task stopped because its budget ran out"),
+    h("p", { class: "muted" }, "The worktree and partial work are kept. Nothing is spent until you choose one of these; adding budget is your explicit authorisation to spend that amount."),
+    h("div", { class: "row" }, field("Add a fixed amount (USD)", amount), h("button", { class: "primary", onclick: () => { if (!amount.value) { setBanner("Enter an amount first", "error"); return; } if (confirm(`Authorise ${amount.value} USD more for this task?`)) run({ action: "add_budget", amount_usd: amount.value }); } }, "Add budget")),
+    h("div", { class: "row" }, field("Cheaper model", model), h("button", { onclick: () => run({ action: "reassign_model", model: model.value }) }, "Reassign model")),
+    h("div", { class: "row" },
+      h("button", { onclick: () => run({ action: "resume_no_increase" }) }, "Check: resume without increase"),
+      h("button", { onclick: () => run({ action: "defer" }) }, "Defer until the month renews"),
+      h("button", { class: "danger", onclick: () => confirm("Cancel the task? The worktree stays on disk.") && run({ action: "cancel" }) }, "Cancel, keep the work")),
+    h("p", { class: "muted" }, headroom == null ? "No cap applies to this task." : `Room left under the task cap: ${usd(headroom)}. “Resume without increase” only works once an accounting error is corrected.`));
+}
+
 async function costsView() {
   const my = navToken;
-  const [wiz, dash] = await Promise.all([api.get("/api/wizard/status"), api.get("/api/dashboard")]);
-  const cfg = wiz.config;
+  const [b, wiz, dash, prices] = await Promise.all([api.get("/api/budget"), api.get("/api/wizard/status"), api.get("/api/dashboard"), api.get("/api/budget/prices")]);
+  const paused = (await Promise.all(dash.projects.map((p) => api.get(`/api/projects/${p.id}/tasks?status=PAUSED_BUDGET`).then((l) => l.map((t) => ({ ...t, project: p.name })))))).flat();
+  const names = Object.fromEntries(dash.projects.map((p) => [p.id, p.name]));
+  const m = b.month;
+  const top = h("input", { id: "c-topup", type: "number", step: "0.01", min: "0.01", placeholder: "USD" });
+  const bal = h("input", { id: "c-credit", type: "number", step: "0.01", min: "0", placeholder: "balance in USD" });
+  const act2 = h("input", { id: "c-actual", type: "number", step: "0.01", min: "0", placeholder: "Console total in USD" });
+  const refresh = () => route();
   show(my, h("h1", null, "Costs"),
-    cfg ? h("div", { class: "card" }, `Caps from setup: global $${cfg.global_budget_usd}, per project $${cfg.project_budget_usd}, per task $${cfg.task_budget_usd}.`) : h("div", { class: "note warn" }, "No cap saved yet. ", link("#/settings", "Set it in settings"), "."),
-    h("h2", null, "Recorded spend per project"),
-    dash.projects.length ? h("table", null, h("thead", null, h("tr", null, ["Project", "Estimated (client-side)", "Reconciled"].map((t) => h("th", null, t)))),
+    paused.length ? h("div", { class: "note warn", role: "alert" }, `${paused.length} task(s) stopped for budget: `, paused.map((t, i) => [i ? ", " : "", link(`#/task/${t.id}`, t.title)])) : null,
+    !b.configured ? h("div", { class: "note warn" }, "No monthly cap saved: live runs are refused. ", link("#/settings", "Set it in settings"), ".") : null,
+    h("div", { class: "card", id: "month-card" },
+      h("h2", null, `Month ${b.period}`),
+      h("div", { class: "row" }, h("strong", null, usd(m.spent_microusd)), m.cap_microusd ? `of ${usd(m.cap_microusd)}` : "(no cap)", `· ${pctText(m.percent)}`, h("span", { class: `pill ${meterClass(m.percent) === "bad" ? "bad" : m.level >= 70 ? "warn" : "ok"}` }, m.level ? `${m.level} % level` : "OK")),
+      meter(m.percent),
+      h("div", { class: "muted" }, LEVEL_TEXT[m.level] || LEVEL_TEXT[0]),
+      h("div", { class: "muted" }, `Held by running workers: ${usd(m.held_microusd)} · available for new runs: ${usd(m.remaining_microusd)} · figures: ${m.label}`),
+      m.reconciliation ? h("div", { class: "muted" }, `Reconciled with the Console: ${usd(m.reconciliation.actual_microusd ?? 0)}`) : null,
+      h("p", { class: "muted" }, "Thresholds are fixed at 70 / 90 / 100 % of the cap. The cap is changed in ", link("#/settings", "Settings"), "; a one-off increase is below.")),
+    h("div", { class: "card" }, h("h2", null, "Add to this month's cap"),
+      h("div", { class: "row" }, top, h("button", { class: "primary", onclick: () => { if (!top.value) { setBanner("Enter an amount first", "error"); return; } if (confirm(`Authorise ${top.value} USD more this month?`)) act(() => api.post("/api/budget/top-up", { scope: "month", amount_usd: top.value }), refresh); } }, "Add to cap")),
+      h("p", { class: "muted" }, "Authorising more spend is always your decision. Credits are never reloaded automatically.")),
+    h("h2", null, "Per project"),
+    b.projects.length ? h("table", null, h("thead", null, h("tr", null, ["Project", "Spent", "Held", "Cap", "Used", "Room left"].map((t) => h("th", null, t)))),
+      h("tbody", null, b.projects.map((p) => h("tr", null, h("td", null, names[p.project_id] || `#${p.project_id}`), h("td", null, usd(p.spent_microusd)), h("td", null, usd(p.held_microusd)), h("td", null, p.cap_microusd ? usd(p.cap_microusd) : "—"), h("td", null, pctText(p.percent)), h("td", null, p.remaining_microusd == null ? "—" : usd(p.remaining_microusd)))))) : empty("No spend or hold this month."),
+    h("h2", null, "Recorded spend (all time, per project)"),
+    dash.projects.length ? h("table", null, h("thead", null, h("tr", null, ["Project", "Estimated (SDK/price table)", "Reconciled"].map((t) => h("th", null, t)))),
       h("tbody", null, dash.projects.map((p) => h("tr", null, h("td", null, p.name), h("td", null, usd(p.spend_microusd.estimated)), h("td", null, usd(p.spend_microusd.reconciled)))))) : empty("No project yet."),
-    h("div", { class: "note" }, "Budget admission, 70/90/100 % thresholds, reservations and the pause-and-choose flow arrive with the budget work package; until then runs are limited only by the per-run budget you enter and the caps checked at start."));
+    paused.length ? h("div", null, h("h2", null, "Tasks waiting for a budget decision"), paused.map((t) => h("div", { class: "card" }, h("strong", null, link(`#/task/${t.id}`, t.title)), h("span", { class: "muted" }, ` · ${t.project} · `), "choose an option on the task page"))) : null,
+    h("div", { class: "card" }, h("h2", null, "Credit balance and reconciliation"),
+      b.credit_balance ? h("p", null, `Entered ${usd(b.credit_balance.entered_microusd)} on ${when(b.credit_balance.as_of)}; estimated left ${usd(b.credit_balance.estimated_remaining_microusd)} (${b.credit_balance.label}).`) : h("p", { class: "muted" }, "No balance entered. The Anthropic API does not expose the remaining credit, so enter it by hand if you want an estimate."),
+      h("div", { class: "row" }, bal,
+        h("button", { onclick: () => bal.value !== "" ? act(() => api.put("/api/budget/credit-balance", { balance_usd: bal.value }), refresh) : setBanner("Enter the balance first", "error") }, "Save balance"),
+        b.credit_balance ? h("button", { onclick: () => act(() => api.del("/api/budget/credit-balance"), refresh) }, "Clear") : null),
+      h("div", { class: "row" }, act2, h("button", { onclick: () => act2.value !== "" ? act(() => api.post("/api/budget/reconcile", { actual_usd: act2.value }), refresh) : setBanner("Enter the Console total first", "error") }, "Reconcile this month")),
+      h("p", { class: "muted" }, "Copy the month's total from the Anthropic Console; CPM corrects its estimate to it.")),
+    h("h2", null, "Limits you should know"),
+    h("ul", null, b.limitations.map((l) => h("li", { class: "muted" }, l))),
+    h("h2", null, "Price table"),
+    prices.length ? h("table", null, h("thead", null, h("tr", null, ["Model", "Input", "Output", "Cache read", "Cache write", "Verified", "Version"].map((t) => h("th", null, t)))),
+      h("tbody", null, prices.map((r) => h("tr", null, h("td", null, r.model), h("td", null, `$${r.input_usd}`), h("td", null, `$${r.output_usd}`), h("td", null, `$${r.cache_read_usd}`), h("td", null, `$${r.cache_write_usd}`), h("td", null, r.verified_on), h("td", null, r.version))))) : empty("No price loaded."),
+    h("p", { class: "muted" }, "USD per million tokens. Check them against the official pricing page before relying on an estimate."));
 }
 
 async function gitView() {
