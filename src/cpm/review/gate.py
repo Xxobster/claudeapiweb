@@ -100,9 +100,7 @@ class _Ctx:
     snap: gitops.Snapshot
 
 
-def classify(
-    change: gitops.Change, scope: list[str], large_ok: bool = False
-) -> str | None:
+def classify(change: gitops.Change, scope: list[str], large_ok: bool = False) -> str | None:
     """Why a changed file is unexpected, or None if it is fine."""
     parts = change.path.split("/")
     if any(p in ("", ".", "..") for p in parts):
@@ -399,7 +397,12 @@ class GateService:
         errors = (f for f in check.findings if f.severity == "error")
         key = "|".join(sorted(f"{f.code}:{f.path}" for f in errors))
         return self._correct(
-            task, "TESTING", "lane_failed", ctx.snap, summary, check.feedback(),
+            task,
+            "TESTING",
+            "lane_failed",
+            ctx.snap,
+            summary,
+            check.feedback(),
             fingerprint("lane_failed", key),
         )
 

@@ -417,7 +417,10 @@ class RunSupervisor:
                 task_id=task_id,
                 provider="sdk" if billing == "api" else "mock",
                 prompt=build_prompt(
-                    data, branch=wt.branch, resumed=resumed, feedback=feedback,
+                    data,
+                    branch=wt.branch,
+                    resumed=resumed,
+                    feedback=feedback,
                     lane_text=self.lanes.prompt_section(lane_ctx) if lane_ctx else None,
                 ),
                 worktree=str(wt.path),

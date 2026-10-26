@@ -24,6 +24,106 @@ lock_files:
 lock_dirs:
   # tools/gpu_lock.sh writes <tool>-<pid>.lock here (voice and art GPU jobs use it, rules 26/49).
   gpu_locks: 'D:\projects\gpu-locks'
-heavy_resources: [unity_editor, gpu, blender, device]
+heavy_resources: [unity_editor, gpu, blender, device, build]   # build: maps verify waits on BUILD_RUNNING.lock too
 default_effort: medium
 pr_body_must_list: [files_changed, security_findings, exploit_findings, what_needs_pc]
+
+# WP14 lanes (3D, maps, Unity validation). Only reviewed in-repo scripts with fixed arguments.
+# Script names marked "verify on PC" are assumptions about the Nirandyr repo (CPM cannot read it
+# from here); a wrong name makes the command refuse, never run something else.
+lanes:
+  three_d:
+    type: model3d
+    title: 3D asset (Blender batch)
+    description: Export or check one model with the project's Blender batch script, then validate the files.
+    resources: [{type: blender}, {type: gpu}]
+    required_tools:
+      blender: 'C:\Program Files\Blender Foundation\Blender 5.2\blender.exe'   # verify on PC
+    commands:
+      - name: blender_export
+        program: blender
+        prefix: [--background, --factory-startup, --python-exit-code, '1', --python, tools/blender/export_asset.py, --]   # verify on PC
+        flags: {--in: path, --out: out_path}
+        needs_trust: true
+        description: Fixed Blender batch script; input .blend inside the worktree, output under the asset path.
+    validators:
+      - {kind: model_opens, params: {glob: 'Assets/Art/Generated/**/*.glb'}}
+      - kind: glb_limits
+        params: {glob: 'Assets/Art/Generated/**/*.glb', max_triangles: 50000, require_uv: true, max_extent: 100, name_regex: '^[A-Za-z0-9_.-]+$'}
+      - kind: blender_report
+        severity: warn
+        params: {glob: 'Assets/Art/Generated/**/*.report.json', max_triangles: 50000, require_uv: true}
+      - {kind: unity_meta, params: {roots: ['Assets/']}}
+    artifacts:
+      asset_paths: ['Assets/Art/Generated/']
+      extensions: ['.glb', '.fbx', '.json', '.meta', '.png']
+      binary_extensions: ['.glb', '.fbx', '.png']
+      max_file_bytes: 50000000
+      binary_policy: ask
+    report: {required_sections: [Summary, Checks]}
+    limits: {max_runtime_s: 3600, hang_timeout_s: 600}
+    task_template:
+      title_prefix: '[3D] '
+      description: Produce the requested model with the Blender batch script. Do not edit anything outside the asset path.
+      required_inputs: [source_blend, asset_name]
+      default_scope: ['Assets/Art/Generated/']
+      default_acceptance: [Model opens and passes poly, UV, scale and naming checks]
+
+  maps:
+    type: maps
+    title: Map verification (frozen world)
+    description: Run the existing generator in verify-only mode against the golden files (the map is frozen, decision 413). Never regenerates.
+    resources: [{type: build, name: zone_gen}]
+    commands:
+      - name: zone_gen_world_verify
+        program: tools/sim/zone_gen.sh
+        prefix: [--world]
+        needs_trust: true
+        description: Existing generator, world map, verify only (fixed arguments).
+    validators:
+      - {kind: golden_unchanged, params: {globs: ['Assets/Maps/golden/**', 'tools/sim/golden/**']}}
+      - {kind: map_dimensions, severity: warn, params: {glob: 'Assets/Maps/Generated/*.json', min_width: 1, min_height: 1}}
+      - {kind: map_connectivity, severity: warn, params: {glob: 'Assets/Maps/Generated/*.json', walkable: [0], min_ratio: 1.0}}
+    artifacts:
+      asset_paths: ['docs/jobs/map_verify/']
+      extensions: ['.md', '.txt']
+      binary_policy: deny
+    report: {required_sections: [Summary, Verification]}
+    limits: {max_runtime_s: 1800, hang_timeout_s: 600}
+    task_template:
+      title_prefix: '[map] '
+      description: Verify the world map against the golden files and write the result in the report. Do not regenerate or change any map file.
+      default_scope: ['docs/jobs/map_verify/']
+      default_acceptance: [Generator verify-only run is clean, no golden file changed]
+
+  unity_validation:
+    type: unity
+    title: Unity validation (Edit Mode tests, import checks)
+    description: Run Edit Mode tests in batch mode on the task worktree, then check results, editor log and .meta files.
+    resources: [{type: unity_editor}, {type: gpu}]
+    required_tools:
+      unity: 'D:\Unity\Editors\6000.3.25f1\Editor\Unity.exe'
+    commands:
+      - name: unity_editmode_tests
+        program: Unity
+        prefix: [-batchmode, -nographics, -runTests, -testPlatform, EditMode]
+        flags: {-projectPath: path, -testResults: out_path, -logFile: out_path}
+        needs_trust: true
+        description: Edit Mode tests only; project is the worktree; results and log under Logs/cpm-validation/.
+    validators:
+      - {kind: unity_results, params: {path: Logs/cpm-validation/results.xml, min_total: 1}}
+      - {kind: unity_log, params: {path: Logs/cpm-validation/editor.log}}
+      - {kind: unity_meta, params: {roots: ['Assets/', 'Packages/']}}
+      - {kind: unity_no_stray_files, params: {globs: ['Library/**', 'Temp/**', 'obj/**']}}
+    artifacts:
+      asset_paths: ['Logs/cpm-validation/']
+      extensions: ['.xml', '.log', '.md']
+      max_file_bytes: 50000000
+      binary_policy: deny
+    report: {required_sections: [Summary, Tests, Import checks]}
+    limits: {max_runtime_s: 5400, hang_timeout_s: 900}
+    task_template:
+      title_prefix: '[unity] '
+      description: Run the Edit Mode tests with the allowed Unity command and report the numbers. Do not edit project files.
+      default_scope: ['Logs/cpm-validation/']
+      default_acceptance: [Edit Mode tests pass, no compile error, no missing meta or GUID]
