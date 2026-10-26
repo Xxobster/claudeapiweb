@@ -21,6 +21,7 @@ from cpm.api import (
     dashboard,
     locks,
     projects,
+    recovery,
     runs,
     scheduler,
     tasks,
@@ -35,6 +36,8 @@ from cpm.locks.external import ExternalWatcher
 from cpm.locks.reservations import ReservationService
 from cpm.logging_setup import configure_logging
 from cpm.providers.keycheck import HttpKeyValidator, KeyValidator, MockKeyValidator
+from cpm.recovery.backup import create_backup
+from cpm.recovery.reconcile import Recovery
 from cpm.scheduler.core import Scheduler, run_forever
 from cpm.security.childenv import inherited_credential_vars
 from cpm.security.middleware import SecurityMiddleware
@@ -58,7 +61,13 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_logging(settings.log_level, settings.log_dir)
+        if settings.db_path.exists():  # before migrations touch it, and before any recovery
+            try:
+                create_backup(settings.db_path, settings.data_dir)
+            except Exception:  # noqa: BLE001 - a failed backup must not stop CPM from starting
+                log.exception("startup backup failed")
         upgrade(settings.db_url)
+        app.state.recovery.reconcile()  # before the scheduler: make the records true first
         leaked = inherited_credential_vars()
         if leaked:
             log.warning(
@@ -100,6 +109,12 @@ def create_app(
     app.state.reservations = ReservationService(
         engine, liveness=lambda task_id: app.state.supervisor.live_run_for_task(task_id) is not None
     )
+    app.state.recovery = Recovery(
+        engine,
+        settings,
+        is_live=app.state.supervisor.is_live,
+        reservations=app.state.reservations,
+    )
     app.state.admission = Admission(engine, app.state.reservations)
     app.state.scheduler = Scheduler(
         engine, app.state.supervisor, app.state.admission, app.state.reservations,
@@ -120,6 +135,7 @@ def create_app(
     app.include_router(runs.router)
     app.include_router(locks.router)
     app.include_router(scheduler.router)
+    app.include_router(recovery.router)
     app.include_router(dashboard.router)
     app.include_router(ui.router)
     ui.mount_static(app)

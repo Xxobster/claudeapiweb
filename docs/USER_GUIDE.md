@@ -85,6 +85,12 @@ CPM starts READY tasks by itself when it is run with `CPM_SCHEDULER=1` (`scripts
 - Tasks waiting for a dependency are moved to READY when it is done. PAUSED and PAUSED_BUDGET tasks wait for you.
 - Starting a task by hand (`POST /api/tasks/{id}/runs`) skips the reservation check: prefer letting the scheduler do it.
 
+## Restart and backups (v0.12.0)
+- When CPM starts it first copies the database to `data\backups\` (the newest 10 are kept), then checks for work that was interrupted by a stop or crash. Interrupted tasks are marked **FAILED** (or **PAUSED** if they were in the middle of a commit: check the task's worktree, then resume or retry yourself). Locks and budget holds of those tasks are freed. Nothing is started or completed by this check.
+- What was found is at `GET /api/recovery` (last report and backup list); `POST /api/recovery/reconcile` repeats the check and `POST /api/recovery/backup` makes a backup now.
+- Worktrees left behind are listed in the report with "has work ... kept" or "clean". CPM never deletes them by itself.
+- Restore a backup: stop CPM, then `python -m cpm.recovery list` and `python -m cpm.recovery restore data\backups\<file>`. The database you replaced is kept next to it as `cpm.db.before-restore-<time>`.
+
 ## What exists in v0.1.0 (skeleton)
 Only the skeleton: `/health`, database with all core tables, migrations, redacted logging. No API key is needed or read. The UI, security middleware and key wizard come in later work packages (PLAN.md WP2+).
 
