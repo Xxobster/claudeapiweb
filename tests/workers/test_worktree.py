@@ -121,3 +121,40 @@ def test_hooks_do_not_run_on_worktree_creation(wm, tmp_path):
     hook.chmod(0o755)
     mgr.ensure(repo, "demo", 1, "t")
     assert not marker.exists()
+
+
+def test_untrusted_git_env_neutralises_diff_drivers(wm, tmp_path):
+    import os
+    import subprocess
+
+    from cpm.security.childenv import build_mock_env
+    from cpm.workers.supervisor import RunSupervisor
+
+    mgr, repo = wm
+    marker = tmp_path / "diff-pwned"
+    prog = tmp_path / "evil.sh"
+    prog.write_text(f'#!/bin/sh\ntouch {marker}\ncat "$1"\n')
+    prog.chmod(0o755)
+    write(repo, ".gitattributes", "*.dat diff=evil\n")
+    write(repo, "a.dat", "one\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "attrs")
+    git(repo, "config", "diff.evil.command", str(prog))
+    git(repo, "config", "diff.evil.textconv", str(prog))
+    info = mgr.ensure(repo, "demo", 1, "t")
+    write(info.path, "a.dat", "two\n")
+    sup = RunSupervisor.__new__(RunSupervisor)  # only the pure env helper is needed
+    env = build_mock_env(extra=sup._untrusted_git_env(info.path))
+    from cpm.workers.permissions import ToolContext, decide
+
+    verdict = decide("Bash", {"command": "git diff"}, ToolContext(info.path))
+    assert verdict.updated_command == "git diff --no-ext-diff --no-textconv"
+    import shlex
+
+    argv = shlex.split(verdict.updated_command)
+    out = subprocess.run(  # noqa: S603
+        [argv[0], "-C", str(info.path), *argv[1:]], env={**env, "PATH": os.environ["PATH"]},  # noqa: S607
+        capture_output=True, check=False,
+    )  # fmt: skip
+    assert out.returncode == 0, out.stderr
+    assert b"two" in out.stdout and not marker.exists()

@@ -254,3 +254,11 @@ def test_sigterm_style_child_exit_without_result_is_crash(env, monkeypatch):
     os.kill(run.pid, signal.SIGKILL)
     done = env.sup.wait(run.id)
     assert done.status == "CRASHED" and supervisor.RUN_ENDED
+
+
+def test_sdk_budget_error_result_is_a_budget_stop(env):
+    t = env.new_task()
+    run = env.sup.wait(env.sup.start(t.id, scenario="sdk_budget_error").id)
+    assert run.status == "BUDGET_STOPPED"
+    assert env.tasks.get(t.id).status == "PAUSED_BUDGET"
+    assert run.cost_microusd == 1500  # the crossing response is reconciled from the total

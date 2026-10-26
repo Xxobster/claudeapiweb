@@ -102,3 +102,17 @@ def test_other_tools_are_denied(ctx):
     for tool in ("WebFetch", "WebSearch", "Task", "Agent", "mcp__x__y", "Skill", "KillShell"):
         assert not ok(tool, {}, ctx)
     assert ok("TodoWrite", {}, ctx)
+
+
+def test_git_diff_family_is_hardened_against_repo_drivers(ctx):
+    for cmd, expect in (
+        ("git diff HEAD~1", "git diff --no-ext-diff --no-textconv HEAD~1"),
+        ("git show HEAD", "git show --no-ext-diff --no-textconv HEAD"),
+        ("git log -p", "git log --no-ext-diff --no-textconv -p"),
+    ):
+        d = decide("Bash", {"command": cmd}, ctx)
+        import shlex
+
+        assert d.allow and shlex.split(d.updated_command) == shlex.split(expect)
+    assert decide("Bash", {"command": "git status"}, ctx).updated_command is None
+    assert not ok("Bash", {"command": "git blame README.md"}, ctx)  # blame has no --no-textconv

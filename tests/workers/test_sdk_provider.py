@@ -96,6 +96,9 @@ def test_options_and_event_mapping(tmp_path, fake_sdk):
     assert o["allowed_tools"] == []  # nothing auto-approved: every call goes through can_use_tool
     assert o["setting_sources"] == [] and o["max_budget_usd"] == 0.5 and o["effort"] == "high"
     assert "WebFetch" in o["disallowed_tools"] and callable(o["can_use_tool"])
+    sessions = [f for t, f in events if t == "session"]
+    assert [x["session_id"] for x in sessions] == ["sess-1"]  # published once, before the result
+    assert [t for t, _ in events].index("session") < [t for t, _ in events].index("result")
     usage = [f for t, f in events if t == "usage"]
     assert (
         len(usage) == 1 and usage[0]["message_id"] == "msg_1" and usage[0]["cost_microusd"] == 7000

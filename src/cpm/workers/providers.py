@@ -25,7 +25,9 @@ from cpm.workers.estimate import estimate_microusd
 from cpm.workers.permissions import Decision, ToolContext, decide
 
 Emit = Callable[..., None]
-SCENARIOS = ("success", "fail", "hang", "crash", "budget_burst", "grandchild", "slow")
+SCENARIOS = (
+    "success", "fail", "hang", "crash", "budget_burst", "grandchild", "slow", "sdk_budget_error",
+)  # fmt: skip
 
 
 @dataclass
@@ -113,6 +115,16 @@ class MockProvider:
         self.emit("error", message="mock failure: the scripted task could not be completed")
         return self._result(False, "mock failed")
 
+    def _s_sdk_budget_error(self) -> int:
+        """The SDK's own max_budget_usd fires first: error result, cost only in the total."""
+        self._start()
+        self._usage(200)
+        self.emit(
+            "result", ok=False, text="budget", session_id=self.session_id,
+            subtype="error_max_budget_usd", total_cost_usd=0.0015,
+        )  # fmt: skip
+        return 1
+
     def _s_hang(self) -> int:
         self._start()
         time.sleep(3600)  # no heartbeat, no output: the watchdog must kill us
@@ -173,6 +185,10 @@ class AgentSdkProvider:
         d: Decision = decide(tool, inp, self.ctx)
         self.emit("permission", tool=tool, allowed=d.allow, reason=d.reason)
         if d.allow:
+            if d.updated_command is not None:
+                return sdk.PermissionResultAllow(
+                    updated_input={**inp, "command": d.updated_command}
+                )
             return sdk.PermissionResultAllow()
         return sdk.PermissionResultDeny(message=d.reason)
 
@@ -199,10 +215,13 @@ class AgentSdkProvider:
         session_id = s.resume_session_id
         ok, text = False, ""
         async for msg in sdk.query(prompt=s.prompt, options=options):
+            new_id = getattr(msg, "session_id", None)
+            if new_id and new_id != session_id:
+                session_id = new_id
+                self.emit("session", session_id=new_id, resumed=bool(s.resume_session_id))
             if self.stop.is_set():
                 self.emit("stopped", session_id=session_id)
                 return 0
-            session_id = getattr(msg, "session_id", None) or session_id
             if isinstance(msg, sdk.AssistantMessage):
                 self._assistant(msg)
             elif isinstance(msg, sdk.ResultMessage):

@@ -538,12 +538,10 @@ class RunSupervisor:
         live.log.append(kind, **fields)
         if kind == "usage":
             self._record_usage(live, fields)
-        elif kind == "session" and isinstance(fields.get("session_id"), str):
-            live.session_id = fields["session_id"]
         elif kind == "result":
             live.result = fields
-            if isinstance(fields.get("session_id"), str):
-                live.session_id = fields["session_id"]
+        if kind in ("session", "stopped", "result") and isinstance(fields.get("session_id"), str):
+            live.session_id = fields["session_id"]
         self._beat(live)
 
     def _beat(self, live: _Live) -> None:
@@ -594,6 +592,9 @@ class RunSupervisor:
     def _finalize(self, live: _Live, code: int | None) -> None:
         res = live.result
         ok = bool(res and res.get("ok"))
+        if live.intent is None and res and res.get("subtype") == "error_max_budget_usd":
+            # The SDK's own cap fired before our estimate did (SDK_NOTES SDK-4): same outcome.
+            live.intent = "budget"
         if live.intent in _OUTCOMES:
             run_status, task_status, reason = _OUTCOMES[live.intent]
         elif code == 0 and ok:

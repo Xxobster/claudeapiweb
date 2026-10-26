@@ -34,9 +34,7 @@ HARMLESS_TOOLS = frozenset({"TodoWrite"})
 PROTECTED_PARTS = frozenset({".git", ".claude", ".mcp.json", ".gitmodules"})
 
 _SHELL_META = re.compile(r"[;&|`$<>(){}\\\n\r\x00]")
-_GIT_READ = frozenset(
-    {"status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "grep", "branch"}
-)
+_GIT_READ = frozenset({"status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "branch"})
 _GIT_WRITE = frozenset({"add", "commit"})
 _GIT_BAD_OPTS = (
     "--output", "--ext-diff", "--textconv", "--no-index", "--exec", "--upload-pack",
@@ -63,6 +61,7 @@ class ToolContext:
 class Decision:
     allow: bool
     reason: str = ""
+    updated_command: str | None = None  # Bash command to run instead (hardened), if any
 
 
 def _deny(reason: str) -> Decision:
@@ -133,6 +132,20 @@ def _safe_arg(tok: str) -> bool:
     return ".." not in tok.split("/")
 
 
+_DIFF_SUBS = frozenset({"diff", "show", "log"})
+
+
+def harden_git(tokens: list[str]) -> list[str]:
+    """Force `--no-ext-diff --no-textconv` on commands that may run a repo diff driver.
+
+    A repository can map files to `diff.<name>.command|textconv` programs through
+    `.gitattributes` plus its config; these flags make git ignore them (THREATS T-05).
+    """
+    if len(tokens) > 1 and tokens[1] in _DIFF_SUBS:
+        return [*tokens[:2], "--no-ext-diff", "--no-textconv", *tokens[2:]]
+    return tokens
+
+
 def _decide_git(ctx: ToolContext, tokens: list[str]) -> Decision:
     if len(tokens) < 2 or tokens[1].startswith("-"):
         return _deny("git needs a subcommand as its first argument")
@@ -148,6 +161,9 @@ def _decide_git(ctx: ToolContext, tokens: list[str]) -> Decision:
             return _deny("path argument leaves the worktree")
     if sub == "branch" and any(not t.startswith("-") for t in rest):
         return _deny("git branch may only list branches")
+    hardened = harden_git(tokens)
+    if hardened != tokens:
+        return Decision(True, "", shlex.join(hardened))
     return _ALLOW
 
 

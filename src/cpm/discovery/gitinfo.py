@@ -130,7 +130,9 @@ def _filter_overrides(root: Path) -> tuple[str, ...]:
     """`-c` arguments that blank every repo-defined content filter command.
 
     `git status` runs `filter.<name>.clean|smudge|process` to compare files, and those commands come
-    from the (untrusted) repo config. An empty command is ignored by git.
+    from the (untrusted) repo config. An empty command is ignored by git. (Diff drivers cannot be
+    blanked this way: an empty `diff.<name>.command` makes git try to run it. Workers use
+    `--no-ext-diff --no-textconv`, see `workers/permissions.harden_git`.)
     """
     try:
         listing = _git(root, "config", "--local", "--name-only", "--get-regexp", r"^filter\.")
