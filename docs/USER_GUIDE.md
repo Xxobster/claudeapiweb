@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.2.0, WP2)
+# USER_GUIDE (v0.4.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -26,6 +26,17 @@
 - A new project is **not trusted**: its hooks, MCP servers, skills and settings files stay off and workers load no project settings. Trust it with `PUT .../trust {"trusted": true}` only for projects you wrote or reviewed.
 - `profile: "nirandyr"` applies the Nirandyr profile (`profiles/nirandyr.yaml`). Removing a project (`DELETE`) only forgets it; your files are untouched.
 - After pulling this version re-run `scripts\setup.ps1` (new dependency `pyyaml`).
+
+## Tasks (v0.4.0, API only; the screens come with the UI work package)
+All calls need the install token and CSRF header (see Security basics). A project must exist (see Projects above).
+- Create: `POST /api/projects/{id}/tasks` `{title, description, priority, declared_scope: ["src/"], depends_on: [ids], ...}`. New tasks start in BACKLOG. Scope entries are project-relative (no `..`, no drive letters).
+- Statuses (14): BACKLOG, READY, BLOCKED, RESERVED, RUNNING, TESTING, REVIEWING, CORRECTING, PAUSED, PAUSED_BUDGET, FAILED, COMPLETED, INTEGRATED, CANCELLED. `GET /api/task-states` lists the allowed moves.
+- You can move a task to READY (it becomes BLOCKED with a reason if a dependency is not done), BACKLOG, PAUSED or CANCELLED with `POST /api/tasks/{id}/transition`. The other states are set by CPM's scheduler, workers and acceptance gate; nobody can mark a task completed by hand.
+- Dependencies: `POST /api/tasks/{id}/dependencies {depends_on_id}`; a cycle is refused (409). `GET /api/projects/{id}/ready-queue` shows what can start (lower priority number first).
+- Edit/reprioritize/reassign: `PATCH /api/tasks/{id}` (scope, model, effort and billing mode are locked while a worker is attached). Split: `POST /api/tasks/{id}/split`; merge: `POST /api/projects/{id}/tasks/merge`; cancel: `POST /api/tasks/{id}/cancel`.
+- TODO import: `POST /api/projects/{id}/tasks/import-todo {source_name, text}` turns open Markdown checkboxes into BACKLOG tasks (re-importing is safe). `POST .../tasks/plan {prompt}` makes one task per line with the offline planner (no API call).
+- Prompts: `POST /api/prompts {name, body}` stores a new version; bodies containing keys or tokens are refused.
+- After pulling this version restart CPM: the database migrates to revision 0002 by itself.
 
 ## What exists in v0.1.0 (skeleton)
 Only the skeleton: `/health`, database with all core tables, migrations, redacted logging. No API key is needed or read. The UI, security middleware and key wizard come in later work packages (PLAN.md WP2+).
