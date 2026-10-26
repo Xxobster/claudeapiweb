@@ -1,4 +1,4 @@
-# Nirandyr profile (PLAN.md section 5). Extended in WP6 (locks) and WP12 (lanes).
+# Nirandyr profile (PLAN.md section 5). Extended in WP6 (locks), WP12 (lanes) and WP13 (voice lane).
 id: nirandyr
 path: 'D:\projects\game'          # read-only for CPM; main tree edited only by Desktop
 remote: https://github.com/Xxobster/Nirandyr
@@ -32,6 +32,74 @@ pr_body_must_list: [files_changed, security_findings, exploit_findings, what_nee
 # Script names marked "verify on PC" are assumptions about the Nirandyr repo (CPM cannot read it
 # from here); a wrong name makes the command refuse, never run something else.
 lanes:
+  voice:
+    title: Voice lines
+    description: >-
+      Render the fixed voice lines with the local Kokoro/Piper pipeline (tools/voice/render_fixed.py)
+      and check the result. Free local tools only (Nirandyr rule 36); lowest GPU priority (rule 49).
+    queue_bias: 500          # tasks default to priority 100; builds and art run first, voice last
+    resources:
+      - type: gpu            # heavy: one at a time, waits for BUILD_RUNNING.lock and gpu-locks
+    # The pipeline's own venv lives in the MAIN tree (untracked); CPM only checks that it exists.
+    required_tools:
+      voice_python: 'D:\projects\game\tools\voice\.venv\Scripts\python.exe'
+    task_template:
+      title_prefix: '[voice] '
+      description: >-
+        Render every missing or stale voice line, then run the check mode and fix what it reports.
+      default_acceptance:
+        - render_fixed.py --check exits 0 (no missing or stale line)
+        - every line of the voice index has an output file
+    prompt: |
+      You are the voice lane worker. Work only in this worktree.
+      Allowed commands (exact, nothing else):
+      {commands}
+      Steps: run the check first and read what is missing or stale; render; run the check again
+      until it passes. Rendering resumes: lines that are already valid are skipped, so after an
+      interruption just run it again. Outputs go only under: {asset_paths}.
+      Never edit the voice pipeline, the line scripts or any other source file in this task.
+      Finish with a report that has these sections: {report_sections}.
+    commands:
+      # --check first: the plain rule below would refuse the extra flag.
+      - name: voice-check
+        program: python
+        prefix: [tools/voice/render_fixed.py, --check]
+        needs_trust: true        # runs repository code (R-WP12-4): trusted workspace only
+        description: report missing or stale lines (exit 1 = work left)
+      - name: voice-render
+        program: python
+        prefix: [tools/voice/render_fixed.py]
+        needs_trust: true
+        description: render every missing or stale line
+    artifacts:
+      asset_paths: [Assets/StreamingAssets/Voice/]
+      extensions: [.rva, .json, .wav]
+      binary_extensions: [.rva, .wav]
+      max_file_bytes: 5000000
+      binary_policy: ask       # Nirandyr rules on binaries: Micah decides, CPM never adds LFS rules
+    validators:
+      - kind: files_exist
+        params: {glob: 'Assets/StreamingAssets/Voice/lines/*.rva', min_count: 1}
+      # Completeness against the pipeline's own index (ids -> files). The index shape is
+      # UNVERIFIED on the PC; an unknown shape makes the gate wait for a person, never pass.
+      - kind: voice_line_list
+        params:
+          index: Assets/StreamingAssets/Voice/index.json
+          lines_dir: Assets/StreamingAssets/Voice/lines
+          ext: .rva
+          extra: warn
+      # Only for WAV outputs (Piper fallback or previews); .rva files are not parsed by CPM.
+      - kind: audio_format
+        params: {glob: 'Assets/StreamingAssets/Voice/*.wav', min_duration_s: 0.2, max_duration_s: 60}
+      - kind: audio_loudness
+        params: {glob: 'Assets/StreamingAssets/Voice/*.wav', max_peak_dbfs: -0.5, min_rms_dbfs: -40, max_rms_dbfs: -8}
+      - kind: audio_silence
+        params: {glob: 'Assets/StreamingAssets/Voice/*.wav'}
+    report:
+      required_sections: [Summary, Checks, Left to do]
+    limits:
+      max_runtime_s: 14400     # long generations are allowed (rule 27); hang detection stays
+      hang_timeout_s: 900
   three_d:
     type: model3d
     title: 3D asset (Blender batch)

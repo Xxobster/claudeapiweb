@@ -29,7 +29,7 @@ def bash(ctx, cmd):
 
 
 def test_profile_has_the_three_lanes_and_known_validators():
-    assert set(LANES) == {"three_d", "maps", "unity_validation"}
+    assert set(LANES) == {"voice", "three_d", "maps", "unity_validation"}
     for lane in LANES.values():
         for v in lane.validators:
             assert (

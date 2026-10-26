@@ -135,6 +135,7 @@ def create_app(
         engine, app.state.supervisor, app.state.admission, app.state.reservations,
         ExternalWatcher(engine), gate=app.state.gate,
         resources_for=app.state.lanes.resources, start_args_for=app.state.lanes.start_args,
+        priority_bias_for=app.state.lanes.priority_bias,
     )  # fmt: skip
     app.state.tickets = TicketStore()
 

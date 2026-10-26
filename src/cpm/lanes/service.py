@@ -22,6 +22,7 @@ from cpm.lanes import validators as _builtin  # noqa: F401  (registers the built
 from cpm.lanes import validators_3d as _v3d  # noqa: F401  (WP14)
 from cpm.lanes import validators_map as _vmap  # noqa: F401  (WP14)
 from cpm.lanes import validators_unity as _vunity  # noqa: F401  (WP14)
+from cpm.lanes import voice as _voice  # noqa: F401  (registers the voice validators)
 from cpm.lanes.artifacts import check_artifacts
 from cpm.lanes.commands import describe, serialise
 from cpm.lanes.registry import (
@@ -138,6 +139,14 @@ class LaneService:
                 continue
             out.append(ResourceRequest(r.type, key, "excl", f"lane {ctx.lane_id}"))
         return out
+
+    def priority_bias(self, task: Any) -> int:
+        """Extra priority number of a lane task (0 = none): it yields to tasks with a lower one."""
+        try:
+            ctx = self.context(task.project_id, getattr(task, "lane", None))
+        except LaneError:
+            return 0
+        return ctx.spec.queue_bias if ctx else 0
 
     def start_args(self, task: Any) -> dict[str, Any]:
         try:

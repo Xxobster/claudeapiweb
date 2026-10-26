@@ -129,3 +129,9 @@
 - 3D: the Blender batch script exports, CPM judges the files (GLB triangle count, UV, unit scale, size, names); big binaries still ask you first.
 - Several file names and paths in these lanes are guesses about the Nirandyr repo (see IMPACT_MAP 2k); they are fixed by editing `profiles/nirandyr.yaml` after one look on the PC.
 - Version 0.16.0, no migration. No real API, GitHub, Blender or Unity call was made.
+## 2026-10-26 (WP13) - implementation choices (awaiting Micah only if he disagrees)
+- The voice lane is a profile entry (`lanes.voice` in `profiles/nirandyr.yaml`) plus four validators; the engine gained one generic field, `queue_bias`, so "voice is the lowest priority" (Nirandyr rule 49) is a scheduler rule, not a special case.
+- Only two commands are allowed: `python tools/voice/render_fixed.py [--check]`, exact, trusted workspace only. No `fetch_kokoro.sh`, `story_qc.py` or `make_ab.py` until they are reviewed and their arguments are known.
+- "Restart when the GPU is free" = a READY voice task waits behind the locks and starts when they clear, and the render itself resumes. A FAILED API-billed voice task is not auto-restarted (WP9 decision: no repeated spending without a person); the existing scheduler setting `retry_billing_modes` can include `api` if Micah wants it.
+- Loudness is gated RMS + sample peak in dBFS, not LUFS (no extra dependency). `.rva` is not decoded.
+- Version 0.17.0, no migration. No real API or GitHub call was made.

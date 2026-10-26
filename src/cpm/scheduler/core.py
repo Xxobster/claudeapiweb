@@ -51,6 +51,7 @@ _WAITING = "waiting for tasks"  # prefix `TaskService.mark_ready` writes for dep
 
 ResourcesFor = Callable[[TaskData], Sequence[ResourceRequest]]
 StartArgsFor = Callable[[TaskData], dict[str, Any]]
+PriorityBiasFor = Callable[[TaskData], int]
 
 
 @dataclass
@@ -99,6 +100,7 @@ class Scheduler:
         gate: Any | None = None,
         resources_for: ResourcesFor | None = None,
         start_args_for: StartArgsFor | None = None,
+        priority_bias_for: PriorityBiasFor | None = None,
         clock: Callable[[], datetime] = utcnow,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -111,6 +113,7 @@ class Scheduler:
         self.gate = gate  # cpm.review.gate.GateService: judges tasks that reached TESTING (WP10)
         self.resources_for = resources_for or (lambda _t: ())  # WP12 lanes add their resources
         self.start_args_for = start_args_for or (lambda _t: {})
+        self.priority_bias_for = priority_bias_for or (lambda _t: 0)  # WP13: voice yields (rule 49)
         self.clock = clock
         self.monotonic = monotonic
         self._tick_lock = threading.Lock()
@@ -456,7 +459,8 @@ class Scheduler:
                 extra = list(self.resources_for(t))
                 extras[t.id] = extra
                 heavy = any(r.type in heavy_by_project[t.project_id] for r in extra)
-                out.append(Candidate(t.id, t.project_id, t.priority, t.estimate_microusd, heavy))
+                prio = t.priority + max(0, self.priority_bias_for(t))
+                out.append(Candidate(t.id, t.project_id, prio, t.estimate_microusd, heavy))
         out.sort(key=policy.order_key)
         return out, by_id, extras
 
