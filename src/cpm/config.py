@@ -27,6 +27,9 @@ class Settings:
     data_dir: Path
     log_level: str
     allow_live_key_test: bool = False
+    allow_live_runs: bool = False
+    live_run_max_microusd: int = 2_000_000
+    worktree_root: Path = _REPO_ROOT.parent / "cpm-worktrees"
 
     @property
     def db_path(self) -> Path:
@@ -35,6 +38,10 @@ class Settings:
     @property
     def db_url(self) -> str:
         return f"sqlite:///{self.db_path.as_posix()}"
+
+    @property
+    def runs_dir(self) -> Path:
+        return self.data_dir / "runs"
 
     @property
     def log_dir(self) -> Path:
@@ -62,6 +69,13 @@ def _check_data_dir(path: Path) -> Path:
     return resolved
 
 
+def _check_worktree_root(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if any("onedrive" in part.lower() for part in resolved.parts):
+        raise ConfigError(f"CPM_WORKTREE_ROOT {str(resolved)!r} must not be inside OneDrive")
+    return resolved
+
+
 def load_settings(env: dict[str, str] | None = None) -> Settings:
     e = os.environ if env is None else env
     try:
@@ -70,10 +84,21 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         raise ConfigError("CPM_PORT must be an integer") from exc
     if not 1 <= port <= 65535:
         raise ConfigError("CPM_PORT out of range")
+    try:
+        live_max = int(e.get("CPM_LIVE_RUN_MAX_MICROUSD", 2_000_000))
+    except ValueError as exc:
+        raise ConfigError("CPM_LIVE_RUN_MAX_MICROUSD must be an integer") from exc
+    if live_max < 0:
+        raise ConfigError("CPM_LIVE_RUN_MAX_MICROUSD cannot be negative")
     return Settings(
         host=_check_loopback(e.get("CPM_HOST", DEFAULT_HOST)),
         port=port,
         data_dir=_check_data_dir(Path(e.get("CPM_DATA_DIR", str(_REPO_ROOT / "data")))),
         log_level=e.get("CPM_LOG_LEVEL", "INFO").upper(),
         allow_live_key_test=e.get("CPM_ALLOW_LIVE_KEY_TEST") == "1",
+        allow_live_runs=e.get("CPM_ALLOW_LIVE_RUNS") == "1",
+        live_run_max_microusd=live_max,
+        worktree_root=_check_worktree_root(
+            Path(e.get("CPM_WORKTREE_ROOT", str(_REPO_ROOT.parent / "cpm-worktrees")))
+        ),
     )

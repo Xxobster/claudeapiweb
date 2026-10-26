@@ -47,11 +47,13 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _git(root: Path, *args: str, config: tuple[str, ...] = ()) -> str:
+def _git(
+    root: Path, *args: str, config: tuple[str, ...] = (), timeout: int = TIMEOUT_S
+) -> str:
     cmd = ["git", *_HARDEN, *config, "-C", str(root), *args]
     try:
         done = subprocess.run(  # noqa: S603
-            cmd, capture_output=True, text=True, timeout=TIMEOUT_S, env=_env(), check=False
+            cmd, capture_output=True, text=True, timeout=timeout, env=_env(), check=False
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise GitUnavailableError(type(exc).__name__) from exc

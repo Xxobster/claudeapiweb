@@ -51,3 +51,13 @@
 - Split cancels the original and creates subtasks (they inherit dependencies; dependents of the original now wait for all parts). Merge cancels the originals and creates one task (union of scope/acceptance, minimum priority). Both only for BACKLOG/READY/BLOCKED tasks and both roll back on a cycle.
 - TODO import: Markdown checkboxes only (`- [ ]`, `1. [ ]`), nesting becomes `parent_id`, `[x]` items skipped, code fences ignored, re-import adds nothing (hash per project). The API takes the file text; reading the file from a managed repo is WP3 (discovery).
 - AI planner: only the deterministic MockPlanner exists; `live: true` answers 501 until WP5 and Micah's budget go.
+
+## 2026-10-26 (WP5) — implementation choices (awaiting Micah only if he disagrees)
+- Process model: the supervisor starts `python -I -m cpm.workers.run --spec <file>` with `cwd = data\runs\<run>` (never the worktree, so a file in the managed repo cannot shadow a module), an explicit environment, and a Job Object on Windows (process group on Linux). The child prints JSON lines; the supervisor is the only database writer.
+- Stop semantics: cancel/hang/timeout/budget/shutdown kill the tree immediately; pause writes `stop` on the child's stdin and kills after 3 s. Pause + resume = a new run (attempt n+1) that resumes the previous SDK session in the same worktree.
+- A successful worker moves the task to TESTING, never COMPLETED (acceptance gate = WP10). Failure, crash, hang and timeout -> FAILED (retry via READY keeps the worktree); budget stop -> PAUSED_BUDGET (resuming from it belongs to WP8).
+- Live (API) runs need `CPM_ALLOW_LIVE_RUNS=1`, wizard cap, key in the store, and an explicit per-run budget not above `min(CPM_LIVE_RUN_MAX_MICROUSD = 2 USD, wizard task budget)`. Nothing here calls the API without those; no live run was made in WP5.
+- Cost estimate per message uses the SDK_NOTES section 5 prices (`workers/estimate.py`, integers, never under-counts unknown models); WP8 replaces it with the DB price table. Usage rows dedup on the message id; a final reported total above the sum adds a reconciling row, except for resumed sessions (their total includes earlier runs).
+- Workers get no auto-approved tools: every file and Bash call goes through `workers/permissions.py`. Bash = one simple allowlisted command (git read/add/commit, `ls`, `pwd`, and in a trusted workspace `python -m pytest|ruff|mypy`). Lanes (WP12) will add their own allowlists.
+- Worktree base is `origin/main` when it exists, otherwise HEAD. Content filters (LFS) are blanked for checkout, so LFS files appear as pointers until WP12 decides the binary policy.
+- WebSocket progress is a 0.2 s tail of the JSONL file, so reconnecting with `since=<seq>` replays exactly.

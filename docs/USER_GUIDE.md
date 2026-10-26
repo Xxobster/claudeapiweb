@@ -1,4 +1,4 @@
-# USER_GUIDE (v0.4.0)
+# USER_GUIDE (v0.5.0)
 
 ## Install (Windows 11, PowerShell 5.1)
 1. Clone `https://github.com/Xxobster/claudeapiweb` to `D:\projects\ClaudeProjectManager` (never inside OneDrive; `setup.ps1` and the config loader refuse it).
@@ -37,6 +37,16 @@ All calls need the install token and CSRF header (see Security basics). A projec
 - TODO import: `POST /api/projects/{id}/tasks/import-todo {source_name, text}` turns open Markdown checkboxes into BACKLOG tasks (re-importing is safe). `POST .../tasks/plan {prompt}` makes one task per line with the offline planner (no API call).
 - Prompts: `POST /api/prompts {name, body}` stores a new version; bodies containing keys or tokens are refused.
 - After pulling this version restart CPM: the database migrates to revision 0002 by itself.
+
+## Workers and runs (v0.5.0, API only; the live log screen comes with the UI work package)
+A run is one worker process for one task. It works in its own git worktree under `D:\projects\cpm-worktrees\<project>\task-<id>` on branch `claude/cpm-task-<id>-<title>`; your project folder is never written. The scheduler (WP7) will start runs by itself; until then you start them by hand.
+- Start: `POST /api/tasks/{id}/runs`. The task must be READY (or PAUSED to resume). Tasks with `billing_mode: "mock"` run a scripted fake worker (no key, no money): body `{"scenario": "success|fail|hang|crash|budget_burst|grandchild|slow"}`.
+- Live log: `GET /api/runs/{run}/events?since=<seq>` (polling) or the WebSocket `/api/runs/{run}/stream?since=<seq>` (needs the token header and an allowed Origin). Events are redacted and size-capped; `data\runs\<run>\events.jsonl` is the same log on disk.
+- Stop: `POST /api/runs/{run}/stop` (or cancel the task) kills the worker and everything it started; the task becomes CANCELLED. Pause: `POST /api/runs/{run}/pause` (or move the task to PAUSED) asks the worker to stop, then kills it after 3 s; `POST /api/tasks/{id}/resume` continues the same session in the same worktree.
+- A worker that finishes successfully moves its task to **TESTING**, not COMPLETED: only the acceptance gate (WP10) can complete a task. A crash, a silent hang (no heartbeat for 60 s) or a run over its time limit makes the task FAILED; retry with FAILED -> READY, the worktree and its files are kept. Work is never deleted automatically: `DELETE /api/tasks/{id}/worktree` refuses while the worktree has uncommitted changes or commits that are not merged anywhere else.
+- **Real (API-billed) runs need all of these**: start CPM with `CPM_ALLOW_LIVE_RUNS=1`, finish the wizard (budget cap + key), install the SDK with `pip install -e ".[sdk]"`, and send `max_budget_microusd` with the start request (at most the task budget and at most `CPM_LIVE_RUN_MAX_MICROUSD`, default 2 000 000 = 2 USD, the approved first live test). The run stops by itself when the estimated spend reaches that cap (task becomes PAUSED_BUDGET). Do this only after you decide to run the first live test.
+- Untrusted projects: the worker may edit files in its worktree and read the project, but cannot run tests or linters (they execute repository code); trust the project first to allow `python -m pytest|ruff|mypy`. Workers can never push, fetch, use the network, or touch `.git`, `.claude` or `.mcp.json`.
+- Limits: `max_parallel_agents` from the wizard (default 3, hard maximum 8) counts running workers. Settings: `CPM_WORKTREE_ROOT` (default: `cpm-worktrees` next to the CPM folder, never inside OneDrive or inside the managed project).
 
 ## What exists in v0.1.0 (skeleton)
 Only the skeleton: `/health`, database with all core tables, migrations, redacted logging. No API key is needed or read. The UI, security middleware and key wizard come in later work packages (PLAN.md WP2+).

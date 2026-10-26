@@ -8,7 +8,7 @@ silently.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 BILLING_API = "api"
 _PASSTHROUGH = (
@@ -23,19 +23,45 @@ CREDENTIAL_VARS = (
 )  # fmt: skip
 
 
+def _base_env(parent: Mapping[str, str] | None, extra: Mapping[str, str] | None) -> dict[str, str]:
+    src = os.environ if parent is None else parent
+    wanted = {n.upper() for n in _PASSTHROUGH}
+    env = {k: v for k, v in src.items() if k.upper() in wanted}
+    for name, value in (extra or {}).items():
+        if name.upper() in CREDENTIAL_VARS:
+            raise ValueError(f"{name} cannot be set through extra")
+        env[name] = value
+    return env
+
+
 def build_child_env(
     billing_mode: str,
     api_key: str | None = None,
     parent: Mapping[str, str] | None = None,
+    extra: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     if billing_mode != BILLING_API:
         raise ValueError("only API-billed mode exists in v1 (DECISIONS Q9)")
     if not api_key:
         raise ValueError("API-billed mode needs an API key")
-    src = os.environ if parent is None else parent
-    wanted = {n.upper() for n in _PASSTHROUGH}
-    env = {k: v for k, v in src.items() if k.upper() in wanted}
+    env = _base_env(parent, extra)
     env["ANTHROPIC_API_KEY"] = api_key
+    return env
+
+
+def build_mock_env(
+    parent: Mapping[str, str] | None = None, extra: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """Environment for mock runs: no credential of any kind, so a mock can never bill anything."""
+    return _base_env(parent, extra)
+
+
+def git_config_env(pairs: Sequence[tuple[str, str]]) -> dict[str, str]:
+    """`GIT_CONFIG_COUNT/KEY_n/VALUE_n` entries that override repo-local git config in a child."""
+    env = {"GIT_CONFIG_COUNT": str(len(pairs))}
+    for i, (key, value) in enumerate(pairs):
+        env[f"GIT_CONFIG_KEY_{i}"] = key
+        env[f"GIT_CONFIG_VALUE_{i}"] = value
     return env
 
 
