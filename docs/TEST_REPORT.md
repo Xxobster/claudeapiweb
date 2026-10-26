@@ -6,7 +6,7 @@ Run in the cloud container (Linux, Python 3.13, Chromium). No real API call, no 
 |---|---|
 | `ruff check .` and `ruff format --check .` | clean (199 files) |
 | `mypy --strict src` | no issues (98 files) |
-| `pytest -m "not windows"` | 857 passed, 1 deselected |
+| `pytest -m "not windows"` | 901 passed, 1 deselected |
 | `node tests/ui/e2e.mjs` (Playwright, mock runs) | all checks passed |
 | `pip-audit`, lockfile freshness | run by CI only (not run here) |
 
