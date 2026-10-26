@@ -121,3 +121,10 @@ Only the skeleton: `/health`, database with all core tables, migrations, redacte
 
 ## Developer commands
 `pip install -e ".[dev]"`, `ruff check .`, `pytest -m "not windows"`.
+
+## Nirandyr lanes: 3D, maps, Unity validation (v0.16.0)
+Three lanes ship in `profiles/nirandyr.yaml`. Create a task with `POST /api/projects/{id}/lanes/{lane}/tasks` (lane = `three_d`, `maps` or `unity_validation`); it starts in BACKLOG like any task and is heavy (one at a time, never while `BUILD_RUNNING.lock` or another Nirandyr lock exists).
+- **three_d**: the worker runs the project's Blender batch script (fixed arguments) and writes models to `Assets/Art/Generated/`. The gate checks that each model opens and its triangle count, UVs, scale, size and names; binaries wait for your decision.
+- **maps**: the worker only runs `tools/sim/zone_gen.sh --world` to verify the frozen map and writes a report under `docs/jobs/map_verify/`. Any change to a golden file fails the task.
+- **unity_validation**: the worker runs Edit Mode tests in batch mode on its own worktree. The gate reads the test XML and editor log (failed tests, compile errors, missing scripts) and checks `.meta` files (missing, orphan, duplicate GUID).
+Before the first run, look at the profile once on the PC: the Blender path and script names, the generator options and the golden paths are assumptions (a wrong one makes the task wait or fail with a clear reason, it never runs something else).
