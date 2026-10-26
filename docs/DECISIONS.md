@@ -61,3 +61,11 @@
 - Workers get no auto-approved tools: every file and Bash call goes through `workers/permissions.py`. Bash = one simple allowlisted command (git read/add/commit, `ls`, `pwd`, and in a trusted workspace `python -m pytest|ruff|mypy`). Lanes (WP12) will add their own allowlists.
 - Worktree base is `origin/main` when it exists, otherwise HEAD. Content filters (LFS) are blanked for checkout, so LFS files appear as pointers until WP12 decides the binary policy.
 - WebSocket progress is a 0.2 s tail of the JSONL file, so reconnecting with `since=<seq>` replays exactly.
+
+## 2026-10-26 (WP15) — implementation choices (awaiting Micah only if he disagrees)
+- UI technology: plain HTML/CSS/ES modules served by FastAPI, no Node build and no third-party code (nothing to patch, nothing remote, strict CSP). English text (Q10).
+- WebSocket auth: one-time 30-second ticket bound to the stream path (`POST /api/ws-ticket`); the install token is never put in a URL. Closes T-27.
+- How the page gets the token: `scripts\start.ps1` opens `http://127.0.0.1:8765/#token=...`; the page stores it in this browser's localStorage (so several tabs work) and removes it from the address bar. "Lock" forgets it; pasting it works too.
+- Untrusted projects: every project/task screen says that workers do not load the project's CLAUDE.md, hooks, MCP or skills until the workspace is trusted, and that trusting lets repo scripts run on the PC.
+- Not faked: costs show only recorded ledger rows (estimated vs reconciled). Budget admission, reservations and review/diff screens are explicit "arrives with ..." notes until WP6-WP8/WP10 add their APIs (second UI PR then).
+- Browser tests: `tests/ui/e2e.mjs` (Node + Playwright, mock runs only) is run by hand, not in CI.

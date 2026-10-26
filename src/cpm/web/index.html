@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Project Manager</title>
+<link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+<header class="top">
+  <strong class="brand">CPM</strong>
+  <nav id="nav" aria-label="Main">
+    <a href="#/" data-route="">Dashboard</a>
+    <a href="#/projects" data-route="projects">Projects</a>
+    <a href="#/agents" data-route="agents">Agents</a>
+    <a href="#/costs" data-route="costs">Costs</a>
+    <a href="#/git" data-route="git">Git &amp; review</a>
+    <a href="#/settings" data-route="settings">Settings</a>
+  </nav>
+  <button id="lock" type="button" title="Forget the access token in this browser">Lock</button>
+  <span id="conn" class="pill" role="status">connecting…</span>
+</header>
+<div id="banner" class="banner" hidden></div>
+<main id="view" aria-live="polite"><p class="muted">Loading…</p></main>
+<script type="module" src="/ui/app.js"></script>
+</body>
+</html>
