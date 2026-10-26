@@ -95,11 +95,11 @@ def _decode(raw: bytes, tag: int, bits: int) -> tuple[Any, float]:
             a.byteswap()
         return a, 2147483648.0
     if tag == 3 and bits in (32, 64):
-        a = array("f" if bits == 32 else "d")
-        a.frombytes(raw[: len(raw) - len(raw) % (bits // 8)])
+        fl = array("f" if bits == 32 else "d")
+        fl.frombytes(raw[: len(raw) - len(raw) % (bits // 8)])
         if sys.byteorder == "big":
-            a.byteswap()
-        return a, 1.0
+            fl.byteswap()
+        return fl, 1.0
     raise AudioError(f"unsupported sample format (tag {tag}, {bits} bit)")
 
 
