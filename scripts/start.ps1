@@ -12,6 +12,7 @@ $hostName = if ($env:CPM_HOST) { $env:CPM_HOST } else { '127.0.0.1' }
 if ($hostName -eq 'localhost') { $hostName = '127.0.0.1' }
 if ($hostName.Contains(':')) { $hostName = "[$hostName]" }
 $base = "http://${hostName}:$port"
+if (-not $env:CPM_SCHEDULER) { $env:CPM_SCHEDULER = '1' }  # WP7: the scheduler loop starts READY tasks (mock only until live runs are allowed)
 $server = Start-Process -FilePath $python -ArgumentList @('-m', 'cpm.main') -PassThru -NoNewWindow
 $ready = $false
 for ($i = 0; $i -lt 40; $i++) {

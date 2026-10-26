@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -13,14 +15,27 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from cpm import __version__
-from cpm.api import budget, credentials, dashboard, locks, projects, runs, tasks, ui, wizard
+from cpm.api import (
+    budget,
+    credentials,
+    dashboard,
+    locks,
+    projects,
+    runs,
+    scheduler,
+    tasks,
+    ui,
+    wizard,
+)
 from cpm.config import Settings, load_settings
 from cpm.db.engine import make_engine
 from cpm.db.migrate import upgrade
 from cpm.locks.admission import Admission
+from cpm.locks.external import ExternalWatcher
 from cpm.locks.reservations import ReservationService
 from cpm.logging_setup import configure_logging
 from cpm.providers.keycheck import HttpKeyValidator, KeyValidator, MockKeyValidator
+from cpm.scheduler.core import Scheduler, run_forever
 from cpm.security.childenv import inherited_credential_vars
 from cpm.security.middleware import SecurityMiddleware
 from cpm.security.secrets_store import KeyringSecretStore, SecretStore
@@ -51,7 +66,18 @@ def create_app(
                 ", ".join(leaked),
             )
         log.info("CPM %s started on %s:%s", __version__, settings.host, settings.port)
+        loop_task: asyncio.Task[None] | None = None
+        if settings.scheduler_enabled:
+            app.state.scheduler.start()
+            loop_task = asyncio.create_task(
+                run_forever(app.state.scheduler, settings.scheduler_interval_s)
+            )
+            log.info("scheduler loop started (every %ss)", settings.scheduler_interval_s)
         yield
+        if loop_task is not None:
+            loop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await loop_task
         app.state.supervisor.shutdown()
         engine.dispose()
 
@@ -73,6 +99,10 @@ def create_app(
         engine, liveness=lambda task_id: app.state.supervisor.live_run_for_task(task_id) is not None
     )
     app.state.admission = Admission(engine, app.state.reservations)
+    app.state.scheduler = Scheduler(
+        engine, app.state.supervisor, app.state.admission, app.state.reservations,
+        ExternalWatcher(engine),
+    )  # fmt: skip
     app.state.tickets = TicketStore()
 
     @app.exception_handler(RequestValidationError)
@@ -87,6 +117,7 @@ def create_app(
     app.include_router(tasks.router)
     app.include_router(runs.router)
     app.include_router(locks.router)
+    app.include_router(scheduler.router)
     app.include_router(dashboard.router)
     app.include_router(ui.router)
     ui.mount_static(app)

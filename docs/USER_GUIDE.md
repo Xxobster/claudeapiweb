@@ -76,6 +76,13 @@ CPM keeps one ledger of every message's cost and refuses to start a run that wou
 - Limits: no daily cap yet, no automatic Console reconciliation, SDK `max_budget_usd` is only a backstop. Auto-reload of credits is never used.
 - After pulling this version restart CPM: the database migrates to revision 0004 by itself.
 
+## Scheduler (v0.10.0)
+CPM starts READY tasks by itself when it is run with `CPM_SCHEDULER=1` (`scripts\start.ps1` does this). Every 2 seconds it takes the READY tasks in order (priority number first, then the shorter heavy job, then id), checks the limits (your `max_parallel_agents`, one heavy task at a time), then reserves the files/tools the task declared and starts a worker. If a task cannot start it stays READY and the reason is shown ("blocked by: ..." or "deferred: ...").
+- `GET /api/scheduler`: running tasks, limits, last tick result. `POST /api/scheduler/pause` / `resume`: stop or restart starting new work (running workers are not touched). `POST /api/scheduler/tick`: one pass now.
+- Failed tasks: mock tasks are retried automatically up to 2 times (30 s apart), but never when the same failure repeats twice; then they stay FAILED with a `scheduler.gave_up` note. API-billed tasks are not retried by themselves (a retry costs money); change with `PUT /api/scheduler/config` (`retry_billing_modes`).
+- Tasks waiting for a dependency are moved to READY when it is done. PAUSED and PAUSED_BUDGET tasks wait for you.
+- Starting a task by hand (`POST /api/tasks/{id}/runs`) skips the reservation check: prefer letting the scheduler do it.
+
 ## What exists in v0.1.0 (skeleton)
 Only the skeleton: `/health`, database with all core tables, migrations, redacted logging. No API key is needed or read. The UI, security middleware and key wizard come in later work packages (PLAN.md WP2+).
 
