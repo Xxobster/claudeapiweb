@@ -46,6 +46,9 @@ Full read of `src/cpm/security`, `api`, `providers`, `config`, scripts and CI. N
 | T-25 | M | Agent claims success without evidence | Deterministic acceptance gate; no auto-complete | WP10 |
 | T-26 | L | Windows path with spaces or non-ASCII (OneDrive `20 - PROJECTS`) | Structured args; tests with such paths | all |
 
+## WP4 notes (2026-10-26, v0.3.0)
+Checked: task scope paths (syntactic validation, WP6 re-normalizes), secrets in prompts/events (refused/redacted), SQL injection (ORM bound parameters), 422 responses echo no input, every route behind the guard, no subprocess in `tasks/`, TODO/planner text stored as inert data (T-05 stays open until WP5 quotes it in worker prompts), concurrent transitions (compare-and-set). Residual: task titles/descriptions are stored as typed (a secret typed by the user into a title stays in the DB; events are redacted); graph lock is per process.
+
 ## Process risks
 - PLAN.md says PRs go to `main`; the GitHub repo has no `main`, the default branch is the planning branch `claude/project-thread-px0aun`. WP0's PR targets that branch. Micah may want `main` created from it (one line decision).
 - Scope is large (7 phases); vertical slices S1-S5 stay.

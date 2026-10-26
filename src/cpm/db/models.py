@@ -76,7 +76,7 @@ class Task(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(300))
     description: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(32), default="DRAFT")
+    status: Mapped[str] = mapped_column(String(32), default="BACKLOG")
     priority: Mapped[int] = mapped_column(Integer, default=100)
     role: Mapped[str | None] = mapped_column(String(64))
     model: Mapped[str | None] = mapped_column(String(64))
@@ -86,6 +86,12 @@ class Task(Base):
     acceptance: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of criteria
     estimate_microusd: Mapped[int] = mapped_column(BigInteger, default=0)
     block_reason: Mapped[str | None] = mapped_column(Text)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # manual | prompt | todo
+    source_ref: Mapped[str | None] = mapped_column(String(64))  # import dedup hash
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -93,6 +99,7 @@ class Task(Base):
     __table_args__ = (
         CheckConstraint("billing_mode IN ('api','cli','mock')", name="billing_mode"),
         Index("ix_tasks_project_status", "project_id", "status"),
+        UniqueConstraint("project_id", "source_ref", name="source_ref"),
     )
 
 

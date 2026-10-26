@@ -1,4 +1,4 @@
-# IMPACT_MAP (WP3, v0.3.0, 2026-10-26)
+# IMPACT_MAP (WP4, v0.4.0, 2026-10-26)
 
 Rule: before editing a module, read its row; after editing, update the row, the chains and the change log (CLAUDE.md rules 2 and 22). Modules marked (built) exist in code; the others describe the planned design (ARCHITECTURE.md).
 
@@ -8,9 +8,9 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 | `db` (built: `src/cpm/db/{engine,models,migrate}.py`, `migrations/`) | SQLite | every module; migrations; backup/restore; security tests on schema | WP1 |
 | `security` (built: `redaction.py`, `tokens.py`, `middleware.py`, `secrets_store.py`, `paths.py`, `childenv.py`; `config.py` loopback + no-OneDrive) | keyring, `data/install_token`, logs | api, workers (env), git, discovery, reservations (paths), all tests/security | WP1-2 |
 | `providers/keycheck` (built: Mock + HTTP key validators) | Anthropic `/v1/models` only when live flag set | api/credentials, WP5 providers | WP2 |
-| `api` (built: `app.py`, `credentials.py`, `wizard.py`, `projects.py`) (FastAPI, WebSocket) | db, scheduler | UI, security middleware, event stream | WP1+ |
+| `api` (built: `app.py`, `credentials.py`, `wizard.py`, `projects.py`, `tasks.py`) (FastAPI, WebSocket) | db, scheduler | UI, security middleware, event stream | WP1+ |
 | `discovery` (built: `discovery/{gitinfo,scan,commands,policy}.py`, `profiles.py`, `api/projects.py`, `profiles/*.yaml`) | managed repo (read-only), `projects`/`project_sources`/`events` tables, `approved_roots` + `project.<id>.patterns` settings | tasks import, worker prompts, workspace trust | WP3 |
-| `tasks` (DAG, state machine) | db | scheduler, UI, acceptance gate, budgets | WP4 |
+| `tasks` (built: `src/cpm/tasks/{states,service,todo_import,planner,prompts}.py`, `api/tasks.py`) | db (`tasks`, `task_deps`, `events`, `prompts`) | scheduler (ready queue, transitions), workers (RUNNING/TESTING...), acceptance gate (COMPLETED evidence), budgets (PAUSED_BUDGET), reservations (`declared_scope`), UI | WP4 |
 | `workers` (runner, providers) | worktrees, SDK | budget ledger, reservations, logs, Job Object, billing mode | WP5 |
 | `git` (worktrees, policy, PR) | managed repo, GitHub | tasks, security (token), reservations, UI review center | WP5, WP10 |
 | `locks` (reservations, adapters) | db, Nirandyr lock files | scheduler, UI conflict messages, Nirandyr scripts (read-only) | WP6 |
@@ -38,6 +38,18 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 - Lockfile: after changing dependencies run `uv pip compile pyproject.toml --extra dev --universal --python-version 3.12 --generate-hashes -o requirements.lock`; CI fails if it is stale.
 - WP5 must add `claude-agent-sdk` (pinned) to the lock and use `build_child_env`; WP15 must decide the WebSocket token transport (browsers cannot set headers: subprotocol or short-lived ticket).
 
+## 2d. WP4 notes (tasks)
+- `tasks/states.py` is the only transition table. Every status change goes through `TaskService.transition` (compare-and-set UPDATE + `events` row). Never `UPDATE tasks SET status` elsewhere.
+- COMPLETED needs `evidence={"acceptance_gate": "passed"}`: only the WP10 gate may pass it. The HTTP API refuses all machine states (`USER_TARGETS` = BACKLOG, READY, BLOCKED, PAUSED, CANCELLED). Invariant tests: `tests/unit/test_task_states.py`.
+- Scheduler (WP7) must consume `ready_queue()` and call `transition` RESERVED/RUNNING; workers (WP5) TESTING..; budgets (WP8) PAUSED_BUDGET -> READY/RUNNING; recovery (WP9) FAILED/PAUSED -> READY (increments `retry_count`).
+- `declared_scope` entries are validated with `security.paths.validate_relative` (syntactic) and are only candidates: WP6 must normalize them again before reserving.
+- Graph mutations (dependency add, split, merge) are serialized with a process-wide lock; fine for the single-process server, revisit if CPM ever runs several processes.
+- TODO text and planner output are untrusted data (T-05): they become titles/descriptions only. WP5 must quote them as data in worker prompts.
+- Prompt store refuses bodies matching the secret redaction patterns.
+- Migration `0002` adds `parent_id`, `retry_count`, `source`, `source_ref` (unique per project: import dedup), `started_at`, `completed_at`; initial status is BACKLOG (was DRAFT). Backup/restore (WP9) must include them.
+- `migrations/env.py` now runs migrations with `PRAGMA foreign_keys=OFF`, then `foreign_key_check`, then ON (SQLite batch rebuilds would otherwise cascade-delete referencing rows). Any future migration inherits this; test populated upgrades like `test_upgrade_0002_keeps_referencing_rows`.
+- A new endpoint on the task API needs a test in `tests/security/test_tasks_security.py` (auth + CSRF).
+
 ## 3. Open risks (see THREATS.md for the full list)
 High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Micah's decision). Process: subscription use of the SDK unverified (CLI mode stays a stub); Admin cost API availability unknown.
 
@@ -64,4 +76,5 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 | 2026-10-21 | 0.0.1 | WP0: SDK_NOTES, ARCHITECTURE, THREATS, this skeleton, scripts/check_env.ps1, DECISIONS synced with the planning branch | CPM Plan thread |
 | 2026-10-24 | 0.2.0 | WP2: install token + Host/Origin/CSRF guard (HTTP and WebSocket), keyring secret store, key wizard/credentials API (Mock validator, gated live check), path validator, explicit child env, hash-locked dependencies, mypy strict, pip-audit in CI, `tests/security/` (traversal, injection, key exposure, CSRF, DNS rebinding) | CPM Code thread |
 | 2026-10-21 | 0.1.0 | WP1: skeleton (FastAPI `/health`, SQLAlchemy models for 11 core tables, Alembic baseline `0001`, WAL/FK/busy_timeout pragmas, redacting logger, loopback + no-OneDrive config checks, setup/start scripts, CI) | CPM Code thread |
+| 2026-10-26 | 0.4.0 | WP4: task state machine (14 statuses, transition table, no silent completion), dependency DAG with cycle rejection, ready queue, edit/reprioritize/reassign/cancel, split/merge, deterministic TODO import (idempotent), mock AI planner stub, versioned prompt store, `/api/projects/{id}/tasks` and `/api/tasks`, `/api/prompts`; migration 0002 (touches `db/models`, `security/paths.validate_relative`, `api/app`) | CPM Code thread (WP4) |
 | 2026-10-26 | 0.2.1 | Security review of WP1/WP2: root-of-disk refused as approved root, git_url credentials rejected, response hardening headers, API docs disabled, extra reserved names, token-file recovery, CI read-only token (touches `security/middleware`, `security/paths`, `api/wizard`, `api/app`, `providers/keycheck`; WP3 project registry must use `validate_root`, which now refuses drive roots) | CPM Audit thread |
