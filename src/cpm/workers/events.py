@@ -75,7 +75,9 @@ class RunLog:
             return []
         out: list[dict[str, Any]] = []
         with self.path.open("r", encoding="utf-8") as fh:
-            for line in fh:
+            for n, line in enumerate(fh):
+                if n < since:
+                    continue  # one line per seq (1-based): skip replayed lines without parsing
                 try:
                     ev = json.loads(line)
                 except ValueError:

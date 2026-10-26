@@ -114,12 +114,22 @@ def _decide_read(ctx: ToolContext, tool: str, inp: dict[str, Any]) -> Decision:
     return _ALLOW
 
 
+_PROTECTED_FOLDED = frozenset(p.casefold() for p in PROTECTED_PARTS)
+_SHORT_NAME = re.compile(r"^(git|claude|mcp|gitmo)[a-z]*~\d+(\..*)?$", re.IGNORECASE)
+
+
+def _protected(part: str) -> bool:
+    """Case-insensitive (NTFS/APFS) match, also for 8.3 short names such as CLAUDE~1."""
+    name = part.rstrip(". ").casefold()
+    return name in _PROTECTED_FOLDED or bool(_SHORT_NAME.match(name))
+
+
 def _decide_write(ctx: ToolContext, inp: dict[str, Any]) -> Decision:
     res = _inside(ctx, inp.get("file_path", inp.get("notebook_path")))
     if isinstance(res, str):
         return _deny(res)
     rel = _rel(ctx, res)
-    if any(part in PROTECTED_PARTS for part in rel.split("/")):
+    if any(_protected(part) for part in rel.split("/")):
         return _deny(f"{rel} is protected (git metadata, hooks and MCP settings)")
     if not _in_scope(ctx, rel):
         return _deny(f"{rel} is outside the task's declared scope")
@@ -130,6 +140,13 @@ def _safe_arg(tok: str) -> bool:
     if tok.startswith(("/", "~", "\\")) or _DRIVE.match(tok):
         return False
     return ".." not in tok.split("/")
+
+
+def _real_inside(ctx: ToolContext, tok: str) -> bool:
+    """Textual check plus real-path check: a symlink/junction in the repo must not lead out."""
+    if not _safe_arg(tok):
+        return False
+    return not isinstance(_inside(ctx, tok.split("::", 1)[0] or "."), str)
 
 
 _DIFF_SUBS = frozenset({"diff", "show", "log"})
@@ -186,7 +203,7 @@ def _decide_python(ctx: ToolContext, tokens: list[str]) -> Decision:
                 return _deny(f"option {name} is not allowed")
             if name in _OPTS_WITH_VALUE and "=" not in tok:
                 i += 1  # the value is free text (an expression), checked by the shell filter
-        elif not _safe_arg(tok):
+        elif not _real_inside(ctx, tok):
             return _deny("path argument leaves the worktree")
         i += 1
     return _ALLOW
@@ -212,7 +229,7 @@ def _decide_bash(ctx: ToolContext, inp: dict[str, Any]) -> Decision:
     if head in ("ls", "dir", "pwd"):
         return (
             _ALLOW
-            if all(t.startswith("-") or _safe_arg(t) for t in tokens[1:])
+            if all(t.startswith("-") or _real_inside(ctx, t) for t in tokens[1:])
             else _deny("path argument leaves the worktree")
         )
     return _deny(f"command {tokens[0]!r} is not on the worker allowlist")

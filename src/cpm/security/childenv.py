@@ -23,10 +23,21 @@ CREDENTIAL_VARS = (
 )  # fmt: skip
 
 
+def _safe_path(value: str) -> str:
+    """Keep absolute PATH entries only: '', '.' or relative ones would resolve inside the cwd."""
+    keep = [e for e in value.split(os.pathsep) if e and (os.path.isabs(e) or e[1:2] == ":")]
+    return os.pathsep.join(keep)
+
+
 def _base_env(parent: Mapping[str, str] | None, extra: Mapping[str, str] | None) -> dict[str, str]:
     src = os.environ if parent is None else parent
     wanted = {n.upper() for n in _PASSTHROUGH}
     env = {k: v for k, v in src.items() if k.upper() in wanted}
+    for k in list(env):
+        if k.upper() == "PATH":
+            env[k] = _safe_path(env[k])
+    # Windows: never look for programs in the (untrusted) current directory first.
+    env["NoDefaultCurrentDirectoryInExePath"] = "1"
     for name, value in (extra or {}).items():
         if name.upper() in CREDENTIAL_VARS:
             raise ValueError(f"{name} cannot be set through extra")

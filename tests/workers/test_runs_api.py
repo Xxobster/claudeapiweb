@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from cpm.api.app import create_app
 from cpm.config import Settings
 from cpm.db.models import Project
+from cpm.db.settings_repo import set_setting
 from cpm.security.secrets_store import MemorySecretStore
 from cpm.security.tokens import csrf_for, load_or_create_token
 from tests.fixtures.repos import make_repo
@@ -28,6 +29,7 @@ def api(tmp_path):
             s.add(p)
             s.commit()
             pid = p.id
+        set_setting(app.state.engine, "approved_roots", [str(repo)])
         yield c, h, pid, token
 
 
