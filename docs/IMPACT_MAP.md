@@ -18,7 +18,7 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 | `budget` (ledger, admission) | db | scheduler, workers (usage), UI cost center, SDK_NOTES prices | WP8 |
 | `recovery` | db, processes, worktrees | scheduler, locks, budget, git | WP9 |
 | `lanes` (voice, 3D, map, Unity) | Nirandyr tools | locks (gpu/unity), git, budget, Nirandyr rules | WP12-14 |
-| `web` (UI) | api | every API contract | WP15 |
+| `web` (built: `src/cpm/web/{index.html,app.css,api.js,app.js}`, `api/ui.py`, `api/dashboard.py`, `security/tickets.py`) | api (token, CSRF, REST, one-time WS ticket) | every API contract: a renamed field or status breaks a screen; `tests/ui/e2e.mjs` is the check | WP15 |
 | docs / profiles (`profiles/nirandyr.yaml`) | files | lanes, locks, git | WP3+ |
 
 ## 2. Consequence chains (examples to keep true)
@@ -36,7 +36,7 @@ Rule: before editing a module, read its row; after editing, update the row, the 
 - Pydantic's default 422 echoes the input; `app.py` overrides it. New models carrying secrets must use `SecretStr`.
 - The API key exists only in the `SecretStore` (Credential Manager). `settings` table holds no secrets; `wizard.config` stores budgets as micro-USD integers.
 - Lockfile: after changing dependencies run `uv pip compile pyproject.toml --extra dev --universal --python-version 3.12 --generate-hashes -o requirements.lock`; CI fails if it is stale.
-- WP5 must add `claude-agent-sdk` (pinned) to the lock and use `build_child_env`; WP15 must decide the WebSocket token transport (browsers cannot set headers: subprotocol or short-lived ticket).
+- WP5 must add `claude-agent-sdk` (pinned) to the lock and use `build_child_env`; WP15 decided the WebSocket token transport: one-time ticket (see 2e).
 
 ## 2d. WP4 notes (tasks)
 - `tasks/states.py` is the only transition table. Every status change goes through `TaskService.transition` (compare-and-set UPDATE + `events` row). Never `UPDATE tasks SET status` elsewhere.
@@ -79,9 +79,17 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 - Log handlers must use `RedactingFormatter` (`logging_setup.py`); any new handler bypassing it is a T-01 regression.
 - `config.load_settings` is the only place reading `CPM_*` env vars.
 
+## 2e. WP15 notes (web UI)
+- The UI is a static, build-less SPA served by FastAPI (`/` + `/ui/*`, public but Host/Origin-checked). It calls only `/api/*` with `X-CPM-Token`; mutations add `X-CPM-CSRF` from `/api/session`. Live logs: `POST /api/ws-ticket {run_id}` then `ws://.../api/runs/{id}/stream?ticket=...&since=n`.
+- Consequence: any new API field shown in the UI must be added to `app.js`; any new endpoint stays token-protected by default (only `/health`, `/`, `/ui/*` are public: `security/middleware.py` `PUBLIC_PATHS`/`UI_PREFIX`).
+- Dashboard data is `GET /api/dashboard` (task counts per project, live workers, spend split estimated/reconciled). WP6-WP8 (reservations, scheduler, budget admission) should add their own endpoints; the Costs and Git pages already carry a "arrives with ..." note that must be replaced then (no fake numbers). Hook points: `costsView()` (budget caps, thresholds, PAUSED_BUDGET options), `agentsView()` (reservations/conflicts), `gitView()` (diff/review, WP10).
+- The UI must never use `innerHTML`, inline script/style or a remote asset (CSP + test). Browser tabs share the token via localStorage.
+- `websockets` is now a runtime dependency (uvicorn's WebSocket support); the lock was regenerated.
+
 ## 4. Change log
 | Date | Version | Change | By |
 |---|---|---|---|
+| 2026-10-26 | 0.7.0 | WP15: web UI (dashboard, projects, Kanban + table, task page with live log, agent monitor, costs, git/review placeholder, settings/wizard, workspace-trust explanation), one-time WebSocket tickets (T-27 closed), CSP + static serving, `/api/dashboard`, `websockets` dependency, `start.ps1` opens the UI with the token fragment; no migration | CPM Code thread (WP15) |
 | 2026-10-26 | 0.5.1 | Safety review of WP5: cancel-during-launch race, task-wide budget ceiling, project path re-validation, case-insensitive protected paths, symlink-safe `ls`/pytest args, 1 MB line cap, no stale kill after close, safe child PATH (touches `workers/{supervisor,proctree,permissions,events}`, `api/runs`, `security/childenv`; no migration) | CPM Audit thread |
 | 2026-10-26 | 0.5.0 | WP5: worker runner (`cpm.workers`): child process per task with tree-kill (Job Object on Windows), heartbeat/hang watchdog, per-run budget backstop, JSONL event log + REST/WebSocket stream, cancel/pause/resume, MockProvider scenarios, `AgentSdkProvider` behind the live-run gates (never run live), worktree manager, tool permission policy; `/api/tasks/{id}/runs`, `/api/runs/*`; config flags; no migration (touches `api/app`, `api/tasks`, `config`, `security/childenv`, `discovery/gitinfo`) | CPM Code thread (WP5) |
 | 2026-10-26 | 0.3.0 | WP3: project registry API (`/api/projects`, `/api/profiles`), read-only git inspection, instruction/memory/task source discovery with include/exclude/refresh and custom globs, command detection, workspace-trust flag + `worker_policy`, `profiles/nirandyr.yaml`, fixture-repo tests for acceptance scenarios 1-3, `pyyaml` dependency | CPM Code thread |

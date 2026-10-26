@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
+from urllib.parse import parse_qs
 
+from cpm.security.tickets import TicketStore
 from cpm.security.tokens import csrf_for, same
 
 Scope = MutableMapping[str, Any]
@@ -19,6 +21,10 @@ Receive = Callable[[], Awaitable[MutableMapping[str, Any]]]
 Send = Callable[[MutableMapping[str, Any]], Awaitable[None]]
 
 PUBLIC_PATHS = frozenset({"/health"})
+# The static UI shell carries no data and no token; it is served to anyone who passes the Host and
+# Origin checks. Everything it then asks of the API needs the token (WP15, docs/THREATS.md T-39).
+UI_ROOT = "/"
+UI_PREFIX = "/ui/"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 TOKEN_HEADER = b"x-cpm-token"
 CSRF_HEADER = b"x-cpm-csrf"
@@ -51,8 +57,16 @@ def allowed_hosts(port: int) -> frozenset[str]:
 
 
 class SecurityMiddleware:
-    def __init__(self, app: Callable[..., Awaitable[None]], *, token: str, port: int) -> None:
+    def __init__(
+        self,
+        app: Callable[..., Awaitable[None]],
+        *,
+        token: str,
+        port: int,
+        tickets: TicketStore | None = None,
+    ) -> None:
         self.app = app
+        self.tickets = tickets or TicketStore()
         self.token = token
         self.csrf = csrf_for(token)
         self.hosts = allowed_hosts(port)
@@ -93,8 +107,17 @@ class SecurityMiddleware:
         method = "GET" if is_ws else scope["method"].upper()
         if is_ws and origin is None:
             return 403, "origin_required"
-        if scope["path"] in PUBLIC_PATHS and method in SAFE_METHODS:
+        path = scope["path"]
+        public = path in PUBLIC_PATHS or path == UI_ROOT or path.startswith(UI_PREFIX)
+        if public and not is_ws and method in SAFE_METHODS:
             return None
+        if is_ws:
+            # Browsers cannot set headers on a WebSocket: a one-time ticket bound to this path
+            # replaces the token header (the token itself never goes into a URL).
+            query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
+            ticket = (query.get("ticket") or [None])[0]
+            if self.tickets.consume(ticket, path):
+                return None
         supplied = headers.get(TOKEN_HEADER)
         if not same(supplied.decode("latin-1") if supplied else None, self.token):
             return 401, "token_required"
