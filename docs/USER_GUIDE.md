@@ -83,6 +83,7 @@ CPM starts READY tasks by itself when it is run with `CPM_SCHEDULER=1` (`scripts
 - `GET /api/scheduler`: running tasks, limits, last tick result. `POST /api/scheduler/pause` / `resume`: stop or restart starting new work (running workers are not touched). `POST /api/scheduler/tick`: one pass now.
 - Failed tasks: mock tasks are retried automatically up to 2 times (30 s apart), but never when the same failure repeats twice; then they stay FAILED with a `scheduler.gave_up` note. API-billed tasks are not retried by themselves (a retry costs money); change with `PUT /api/scheduler/config` (`retry_billing_modes`).
 - Tasks waiting for a dependency are moved to READY when it is done. PAUSED and PAUSED_BUDGET tasks wait for you.
+- Scheduler screen (v0.11.1, menu "Scheduler"): pause/resume, "Run one pass", the global / per-project / heavy limits, the workers running now, the queue in start order with the reason each task waits ("waiting: ...", "blocked by: ...", "deferred: ..." and the backoff time left after a refused start), the failed tasks with what automatic retry will do, and the form for the limits. The button for automatic retry of API tasks is off by default; turning it on asks for confirmation because every retry spends from the budget. The page refreshes every 3 s.
 - Starting a task by hand (`POST /api/tasks/{id}/runs`) skips the reservation check: prefer letting the scheduler do it.
 
 ## Restart and backups (v0.12.0)

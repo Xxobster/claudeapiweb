@@ -169,6 +169,82 @@ class Scheduler:
             "last_tick": self._last.as_dict() if self._last else None,
         }  # fmt: skip
 
+    def queue(self) -> dict[str, Any]:
+        """Read-only view for the UI: READY tasks in dispatch order with why each one waits, the
+        backoff left after a refused start, the running workers and what auto-retry would do."""
+        cfg = self.config()
+        cands, by_id, _extras = self._candidates()
+        now_m = self.monotonic()
+        skipped = self._last.skipped if self._last else {}
+        with Session(self.engine) as s:
+            names = {pid: nm for pid, nm in s.execute(select(Project.id, Project.name))}
+            ready = []
+            for pos, c in enumerate(cands, 1):
+                t = by_id[c.task_id]
+                cool = self._cooldown.get(t.id)
+                reason, source = skipped.get(t.id), "tick"
+                if reason is None:
+                    reason, source = self._last_reason(s, t.id), "event"
+                ready.append({
+                    "position": pos, "task_id": t.id, "project_id": t.project_id,
+                    "project": names.get(t.project_id, ""), "title": t.title,
+                    "priority": t.priority, "billing_mode": t.billing_mode,
+                    "estimate_microusd": t.estimate_microusd, "heavy": c.heavy,
+                    "reason": reason, "reason_source": source if reason else None,
+                    "backoff_s": round(max(0.0, cool[0] - now_m), 1) if cool else 0.0,
+                    "refused_starts": cool[1] if cool else 0,
+                })  # fmt: skip
+            running = []
+            for tid, pid in self._in_flight():
+                row = s.get(Task, tid)
+                running.append({
+                    "task_id": tid, "project_id": pid, "project": names.get(pid, ""),
+                    "title": row.title if row else "",
+                    "billing_mode": row.billing_mode if row else "",
+                })  # fmt: skip
+            failed = s.execute(
+                select(Task.id, Task.project_id, Task.title, Task.retry_count, Task.billing_mode)
+                .where(Task.status == "FAILED")
+                .order_by(Task.id)
+            ).all()
+            retries = []
+            now = self.clock()
+            for tid, pid, title, count, billing in failed:
+                runs = s.scalars(
+                    select(Run)
+                    .where(Run.task_id == tid, Run.ended_at.is_not(None))
+                    .order_by(Run.id)
+                ).all()
+                d = policy.retry_decision(
+                    [FailedRun(r.status, _reason(r.result_json), _aware(r.ended_at)) for r in runs],
+                    count, billing, cfg, now,
+                )  # fmt: skip
+                retries.append({
+                    "task_id": tid, "project": names.get(pid, ""), "title": title,
+                    "billing_mode": billing, "retry_count": count,
+                    "action": d.action, "why": d.why,
+                })  # fmt: skip
+        return {"ready": ready, "running": running, "failed": retries}
+
+    @staticmethod
+    def _last_reason(s: Session, task_id: int) -> str | None:
+        ev = s.scalars(
+            select(Event)
+            .where(Event.task_id == task_id, Event.kind.in_(
+                ("scheduler.deferred", "reservation.blocked", "reservation.granted")))
+            .order_by(Event.id.desc())
+            .limit(1)
+        ).first()  # fmt: skip
+        if ev is None or ev.kind == "reservation.granted":
+            return None
+        try:
+            d = json.loads(ev.detail or "{}")
+        except ValueError:
+            return None
+        if ev.kind == "scheduler.deferred":
+            return "deferred: " + str(d.get("reason", ""))
+        return "blocked by: " + "; ".join(str(b) for b in d.get("blockers", []))
+
     # ----------------------------------------------------------------- events
     def _event_once(self, task: TaskData | _Ref, kind: str, **detail: Any) -> bool:
         """Write a scheduler event unless the task's last scheduler event is identical."""
