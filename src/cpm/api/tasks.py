@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from cpm.tasks import states
 from cpm.tasks.planner import get_planner
 from cpm.tasks.prompts import PromptStore
-from cpm.tasks.service import TaskData, TaskError, TaskService
+from cpm.tasks.service import MAX_TEXT, TaskData, TaskError, TaskService
 from cpm.tasks.todo_import import import_todo
 from cpm.workers.supervisor import RunError
 
@@ -45,7 +45,7 @@ def _out(t: TaskData) -> dict[str, Any]:
 
 class TaskIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
-    description: str = Field(default="", max_length=20_000)
+    description: str = Field(default="", max_length=MAX_TEXT)
     priority: int = Field(default=100, ge=0, le=10_000)
     role: str | None = Field(default=None, max_length=64)
     model: str | None = Field(default=None, max_length=64)
@@ -61,7 +61,7 @@ class TaskIn(BaseModel):
 
 class TaskPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
-    description: str | None = Field(default=None, max_length=20_000)
+    description: str | None = Field(default=None, max_length=MAX_TEXT)
     priority: int | None = Field(default=None, ge=0, le=10_000)
     role: str | None = Field(default=None, max_length=64)
     model: str | None = Field(default=None, max_length=64)
@@ -84,7 +84,7 @@ class DepIn(BaseModel):
 
 class SplitPart(BaseModel):
     title: str = Field(min_length=1, max_length=300)
-    description: str = Field(default="", max_length=20_000)
+    description: str = Field(default="", max_length=MAX_TEXT)
     declared_scope: list[str] | None = Field(default=None, max_length=200)
     acceptance: list[str] = Field(default_factory=list, max_length=200)
 
@@ -104,7 +104,7 @@ class TodoIn(BaseModel):
 
 
 class PlanIn(BaseModel):
-    prompt: str = Field(min_length=1, max_length=20_000)
+    prompt: str = Field(min_length=1, max_length=MAX_TEXT)
     live: bool = False
 
 

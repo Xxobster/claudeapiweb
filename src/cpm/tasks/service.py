@@ -25,7 +25,7 @@ from cpm.security.redaction import redact
 from cpm.tasks import states
 
 MAX_TITLE = 300
-MAX_TEXT = 20_000
+MAX_TEXT = 200_000  # chars; ~50k tokens, well inside the model context
 MAX_SCOPE_ITEMS = 200
 MAX_PRIORITY = 10_000
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
