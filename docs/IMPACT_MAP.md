@@ -239,3 +239,7 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 - Touches: `tasks/service.py` (model validation vs `budget/seed.MODELS`), `workers/supervisor.py` (effort falls back to `wizard.config.default_effort`), `api/lanes.py` (effort), `budget/pricing.rough_task_estimate` + `GET /api/budget/estimate`, `web/app.js` (`modelEffort()` in both task forms). Chain: a new model needs a price row (seed/migration) AND an entry in `seed.BASE`/wizard `MODELS` to be selectable.
 - Security: model/effort are enum-checked server-side (no free text reaches the SDK); the estimate endpoint is read-only behind the guard, no key involved. Risk R-MODEL-1: the heuristic token profile is a guess; refine from the ledger once real runs exist.
 - Fixed in the same change: a task with no effort now gets the Settings default instead of the SDK default.
+
+## 2p. Task description limit raised (v0.19.1)
+- Touches: `tasks/service.MAX_TEXT` (single source, 20k -> 200k chars), `api/tasks.py` (TaskIn/TaskPatch/SplitPart/PlanIn import it), `workers/prompt.py` (description goes into the worker prompt as JSON). DB column is `Text` (unbounded), UI has no maxlength: no migration, no UI change.
+- Security: the cap still bounds DB growth and prompt size (200k chars ~ 50k tokens, `ensure_ascii` JSON can inflate non-ASCII text up to ~6x so very accented text costs more). Description stays untrusted TASK DATA. Risk R-DESC-1: a huge description raises per-run input cost; the budget cap still applies.

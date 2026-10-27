@@ -195,3 +195,16 @@ def test_rough_estimate_follows_model_and_effort(client, auth):
         ).status_code
         == 422
     )
+
+
+def test_long_description_accepted_and_bounded(client, auth, project_id):
+    from cpm.tasks.service import MAX_TEXT
+
+    big = "x" * 150_000
+    r = client.post(url(project_id), json={"title": "big", "description": big}, headers=auth)
+    assert r.status_code == 201, r.text
+    assert client.get(f"/api/tasks/{r.json()['id']}", headers=auth).json()["description"] == big
+    over = client.post(
+        url(project_id), json={"title": "over", "description": "x" * (MAX_TEXT + 1)}, headers=auth
+    )
+    assert over.status_code == 422
