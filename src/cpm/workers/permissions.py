@@ -20,6 +20,7 @@ Design points:
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 from collections.abc import Callable
@@ -79,8 +80,12 @@ def _inside(ctx: ToolContext, raw: object) -> Path | str:
     """The real path if inside the worktree, else a denial reason."""
     if not isinstance(raw, str) or not raw:
         return "missing path"
-    if raw.startswith("~") or _DRIVE.match(raw):
-        return "home-relative and drive paths are not allowed"
+    if raw.startswith("~"):
+        return "home-relative paths are not allowed"
+    # On Windows the SDK hands tools absolute (cwd-joined) paths, so a drive path is fine when
+    # `resolve_within` proves it stays inside the worktree. Elsewhere it is not a real path.
+    if os.name != "nt" and _DRIVE.match(raw):
+        return "drive paths are not allowed"
     try:
         return resolve_within(ctx.worktree, raw)
     except PathPolicyError as exc:

@@ -219,3 +219,10 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 - Voice = profile entry + validators registered by importing `lanes/voice.py` (from `LaneService`). Chain: change `profiles/nirandyr.yaml` voice commands -> permissions allowlist (T-63) -> THREATS; change a validator -> gate lane step -> profile params; change `queue_bias`/`priority_bias` -> `Scheduler._candidates` order only (heavy rules, locks and admission unchanged).
 - `queue_bias` is added to the task priority (never negative). Voice uses 500 = after every ordinary task. Nirandyr rule 49 is self-contradictory about art ("voice stays the lowest-priority GPU job" vs "builds, then voice, then art"); PLAN.md WP13 says voice yields to builds and art, so voice is the lowest. If Micah wants art after voice, WP14 gives art a bigger bias (>500).
 - Open for the PC: R-WP13-1..4 (THREATS WP13 notes).
+
+## 2m. First live run findings (2026-10-26, v0.18.1)
+- First real run (2 USD go): SDK was not installed by `install.ps1` (hash-locked deps exclude the `sdk` extra) -> install `claude-agent-sdk==0.2.170` (pinned, not hash-locked; open: add it to `requirements.lock`). Cost of the smoke run: 0.021 USD.
+- `workers/permissions._inside` rejected every drive path, but the SDK passes tools absolute cwd-joined paths, so all worker writes were denied. Now a drive path is accepted only if `resolve_within` proves it is inside the worktree (outside paths, `~`, `..` still denied; tests in `tests/workers/test_permissions_abs_paths.py`). Security impact: none, containment is the same real-path check.
+- Settings form: the three caps are required (task <= project <= global); labels and `required` added.
+- Pre-existing on this PC (not caused by this change): `tests/workers/test_runner.py` watchdog/process-tree tests and one integrate test fail on Windows; `test_detached_head_still_reports_status` passes alone (flaky under full run).
+
