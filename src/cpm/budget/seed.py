@@ -19,6 +19,7 @@ BASE: dict[str, tuple[int, int, int, int]] = {
     "claude-sonnet-5-5": (2_000_000, 10_000_000, 200_000, 2_500_000),
     "claude-haiku-5-5": (100_000, 500_000, 10_000, 125_000),
 }
+MODELS = tuple(BASE)  # the models a task may name (price table seeds); order = display order
 # model -> (threshold tokens, input, output, cache_read, cache_write_5m) above the threshold
 LONG: dict[str, tuple[int, int, int, int, int]] = {
     "claude-haiku-5-5": (100_000, 500_000, 2_500_000, 50_000, 625_000),

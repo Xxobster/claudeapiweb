@@ -18,6 +18,7 @@ from typing import Any, cast
 from sqlalchemy import CursorResult, Engine, Result, delete, select, update
 from sqlalchemy.orm import Session
 
+from cpm.budget.seed import MODELS
 from cpm.db.models import Event, Project, Task, TaskDep, utcnow
 from cpm.security.paths import PathPolicyError, validate_relative
 from cpm.security.redaction import redact
@@ -256,6 +257,7 @@ class TaskService:
         source_ref: str | None = None,
         lane: str | None = None,
     ) -> TaskData:
+        _check_choice(model, MODELS, "model")
         _check_choice(effort, EFFORTS, "effort")
         _check_choice(billing_mode, BILLING, "billing_mode")
         _check_choice(source, ("manual", "prompt", "todo"), "source")
@@ -467,6 +469,7 @@ class TaskService:
             if "role" in changes:
                 t.role = changes["role"]
             if "model" in changes:
+                _check_choice(changes["model"], MODELS, "model")
                 t.model = changes["model"]
             if "effort" in changes:
                 _check_choice(changes["effort"], EFFORTS, "effort")

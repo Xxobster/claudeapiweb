@@ -8,7 +8,7 @@ token/Host/Origin/CSRF guard.
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,6 +31,7 @@ class LaneTaskIn(BaseModel):
     billing_mode: str = Field(default="api", pattern="^(api|cli|mock)$")
     estimate_microusd: int = Field(default=0, ge=0)
     model: str | None = Field(default=None, max_length=64)
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
 
 
 def _svc(request: Request) -> LaneService:
@@ -80,6 +81,7 @@ def create_lane_task(
             description=svc.template_description(spec, body.inputs),
             priority=body.priority,
             model=body.model,
+            effort=body.effort,
             billing_mode=body.billing_mode,
             declared_scope=tmpl.default_scope or spec.artifacts.asset_paths,
             acceptance=tmpl.default_acceptance,

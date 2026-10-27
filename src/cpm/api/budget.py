@@ -10,13 +10,13 @@ import json
 from decimal import Decimal
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from cpm.api.wizard import MODELS
 from cpm.budget.ledger import BudgetError, BudgetLedger, period_of
-from cpm.budget.pricing import PriceError, PriceTable, Tier
+from cpm.budget.pricing import EFFORT_OUTPUT_FACTOR_PCT, PriceError, PriceTable, Tier
 from cpm.db.models import Event, Task
 from cpm.tasks.service import TaskError, TaskService
 
@@ -195,6 +195,23 @@ def _price_json(r: Any) -> dict[str, Any]:
         "long_threshold": r.long_threshold, "long": tier(r.long) if r.long else None,
         "source": r.source, "verified_on": r.verified_on, "unit": "USD per million tokens",
     }  # fmt: skip
+
+
+@router.get("/budget/estimate")
+def rough_estimate(
+    request: Request, model: str = Query(max_length=64), effort: str = "high"
+) -> dict[str, Any]:
+    """Rough cost of one typical task for a model + effort (planning aid, labelled estimate)."""
+    if model not in MODELS:
+        raise HTTPException(422, f"model must be one of {', '.join(MODELS)}")
+    if effort not in EFFORT_OUTPUT_FACTOR_PCT:
+        raise HTTPException(422, f"effort must be one of {', '.join(EFFORT_OUTPUT_FACTOR_PCT)}")
+    table: PriceTable = _led(request).prices
+    micro, version = table.rough_task_estimate(model, effort)
+    return _with_usd({
+        "model": model, "effort": effort, "estimate_microusd": micro, "price_version": version,
+        "label": "rough estimate for a typical task (not a measurement)",
+    })  # fmt: skip
 
 
 @router.get("/budget/prices")

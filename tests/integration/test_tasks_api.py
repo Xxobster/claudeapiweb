@@ -145,3 +145,53 @@ def test_patch_null_on_non_nullable_is_422(client, auth, project_id, field):
         ).status_code
         == 200
     )
+
+
+def test_task_model_and_effort_choice(client, auth, project_id):
+    r = client.post(
+        url(project_id),
+        json={"title": "deep", "model": "claude-fable-5-1", "effort": "xhigh"},
+        headers=auth,
+    )
+    assert r.status_code == 201, r.text
+    assert (r.json()["model"], r.json()["effort"]) == ("claude-fable-5-1", "xhigh")
+    r2 = client.post(
+        url(project_id),
+        json={"title": "light", "model": "claude-sonnet-5-5", "effort": "low"},
+        headers=auth,
+    )
+    assert (r2.json()["model"], r2.json()["effort"]) == ("claude-sonnet-5-5", "low")
+    for bad in ({"model": "gpt-4"}, {"effort": "ultra"}):
+        assert (
+            client.post(url(project_id), json={"title": "x", **bad}, headers=auth).status_code
+            == 422
+        )
+    tid = r2.json()["id"]
+    assert (
+        client.patch(f"/api/tasks/{tid}", json={"model": "nope"}, headers=auth).status_code == 422
+    )
+    ok = client.patch(f"/api/tasks/{tid}", json={"model": "claude-haiku-5-5"}, headers=auth)
+    assert ok.status_code == 200 and ok.json()["model"] == "claude-haiku-5-5"
+
+
+def test_rough_estimate_follows_model_and_effort(client, auth):
+    def est(model, effort):
+        r = client.get(f"/api/budget/estimate?model={model}&effort={effort}", headers=auth)
+        assert r.status_code == 200, r.text
+        return r.json()["estimate_microusd"]
+
+    assert (
+        est("claude-fable-5-1", "high")
+        > est("claude-sonnet-5-5", "high")
+        > est("claude-haiku-5-5", "high")
+    )
+    assert est("claude-sonnet-5-5", "max") > est("claude-sonnet-5-5", "low")
+    assert (
+        client.get("/api/budget/estimate?model=gpt-4&effort=low", headers=auth).status_code == 422
+    )
+    assert (
+        client.get(
+            "/api/budget/estimate?model=claude-sonnet-5-5&effort=zz", headers=auth
+        ).status_code
+        == 422
+    )

@@ -12,6 +12,7 @@ Live streams use WebSockets with a one-time ticket (`/api/runs/{id}/stream`).
 | GET | `/api/budget` | Budget Summary |
 | PUT | `/api/budget/credit-balance` | Set Credit |
 | DELETE | `/api/budget/credit-balance` | Clear Credit |
+| GET | `/api/budget/estimate` | Rough Estimate |
 | GET | `/api/budget/prices` | List Prices |
 | PUT | `/api/budget/prices/{model}` | Put Price |
 | POST | `/api/budget/reconcile` | Reconcile |
