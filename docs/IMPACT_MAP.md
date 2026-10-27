@@ -214,6 +214,7 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 | 2026-10-21 | 0.1.0 | WP1: skeleton (FastAPI `/health`, SQLAlchemy models for 11 core tables, Alembic baseline `0001`, WAL/FK/busy_timeout pragmas, redacting logger, loopback + no-OneDrive config checks, setup/start scripts, CI) | CPM Code thread |
 | 2026-10-26 | 0.4.0 | WP4: task state machine (14 statuses, transition table, no silent completion), dependency DAG with cycle rejection, ready queue, edit/reprioritize/reassign/cancel, split/merge, deterministic TODO import (idempotent), mock AI planner stub, versioned prompt store, `/api/projects/{id}/tasks` and `/api/tasks`, `/api/prompts`; migration 0002 (touches `db/models`, `security/paths.validate_relative`, `api/app`) | CPM Code thread (WP4) |
 | 2026-10-26 | 0.2.1 | Security review of WP1/WP2: root-of-disk refused as approved root, git_url credentials rejected, response hardening headers, API docs disabled, extra reserved names, token-file recovery, CI read-only token (touches `security/middleware`, `security/paths`, `api/wizard`, `api/app`, `providers/keycheck`; WP3 project registry must use `validate_root`, which now refuses drive roots) | CPM Audit thread |
+| 2026-10-27 | 0.19.0 | Per-task model + effort pickers, model validation, default effort fallback, rough estimate endpoint (see 2o) |
 
 ## 2l. WP13 notes (voice lane, v0.17.0)
 - Voice = profile entry + validators registered by importing `lanes/voice.py` (from `LaneService`). Chain: change `profiles/nirandyr.yaml` voice commands -> permissions allowlist (T-63) -> THREATS; change a validator -> gate lane step -> profile params; change `queue_bias`/`priority_bias` -> `Scheduler._candidates` order only (heavy rules, locks and admission unchanged).
@@ -233,3 +234,8 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 - Test-only: `_alive` used `os.kill(pid, 0)`, which TERMINATES the process on Windows (watchdog/shutdown tests); POSIX-only `WNOHANG`/`SIGKILL`/file-mode checks are now guarded. `tests/recovery/reconcile.py` is POSIX-only by design (`/proc`).
 - Full suite on the PC before the last two fixes: 895 passed, 3 failed (2 fixed here, `test_scenario_9_resume_does_not_reset_cumulative_spend` passes alone: timing flake under load).
 
+
+## 2o. Per-task model and effort (v0.19.0)
+- Touches: `tasks/service.py` (model validation vs `budget/seed.MODELS`), `workers/supervisor.py` (effort falls back to `wizard.config.default_effort`), `api/lanes.py` (effort), `budget/pricing.rough_task_estimate` + `GET /api/budget/estimate`, `web/app.js` (`modelEffort()` in both task forms). Chain: a new model needs a price row (seed/migration) AND an entry in `seed.BASE`/wizard `MODELS` to be selectable.
+- Security: model/effort are enum-checked server-side (no free text reaches the SDK); the estimate endpoint is read-only behind the guard, no key involved. Risk R-MODEL-1: the heuristic token profile is a guess; refine from the ledger once real runs exist.
+- Fixed in the same change: a task with no effort now gets the Settings default instead of the SDK default.

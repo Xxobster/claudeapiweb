@@ -19,6 +19,11 @@ from cpm.db.models import Price
 
 _PER_MTOK = 1_000_000
 MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+# Token profile of a "typical" task and how much more output each effort level produces (percent).
+TYPICAL_INPUT_TOKENS = 150_000
+TYPICAL_CACHE_READ_TOKENS = 600_000
+TYPICAL_OUTPUT_TOKENS = 40_000
+EFFORT_OUTPUT_FACTOR_PCT = {"low": 50, "medium": 75, "high": 100, "xhigh": 150, "max": 200}
 MAX_PRICE_MICROUSD_MTOK = 1_000_000_000  # 1000 USD per million tokens: a typo guard
 
 
@@ -127,6 +132,19 @@ class PriceTable:
         else:
             tier, version = row.tier_for(input_tokens + cache_read + cache_write), row.version
         return cost_microusd(tier, input_tokens, output_tokens, cache_read, cache_write), version
+
+    def rough_task_estimate(self, model: str, effort: str | None) -> tuple[int, int | None]:
+        """Planning figure for one typical task: fixed token profile, output scaled by effort.
+
+        A heuristic, not a measurement: it only lets the same task be compared across models
+        and effort levels, with the model's current price row. Higher effort thinks and writes
+        more, so output tokens grow with it (the input profile does not).
+        """
+        mult = EFFORT_OUTPUT_FACTOR_PCT.get(effort or "high", 100)
+        return self.estimate(
+            model, TYPICAL_INPUT_TOKENS, TYPICAL_OUTPUT_TOKENS * mult // 100,
+            cache_read=TYPICAL_CACHE_READ_TOKENS,
+        )  # fmt: skip
 
     def add_version(
         self, model: str, tier: Tier, *, long_threshold: int | None = None,

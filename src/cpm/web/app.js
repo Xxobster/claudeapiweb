@@ -333,12 +333,13 @@ function laneTaskForm(l, projectId) {
   const title = h("input", { class: "lt-title", size: 40, required: true, maxlength: 200 });
   const prio = h("input", { class: "lt-prio", type: "number", value: "100", min: "0", max: "10000" });
   const mode = h("select", { class: "lt-mode" }, ["mock", "api"].map((m) => h("option", { value: m }, m)));
+  const me = modelEffort();
   const inputs = Object.fromEntries((t.required_inputs || []).map((n) => [n, h("input", { class: "lt-input", "data-input": n, size: 40, required: true, maxlength: 500 })]));
   return h("form", { class: "lane-form", onsubmit: (e) => {
     e.preventDefault();
     if (mode.value === "api" && !confirm("This task is billed to the API when it runs (it is only created now, nothing is spent yet). Create it as an API task?")) return;
     act(async () => {
-      const task = await api.post(`/api/projects/${projectId}/lanes/${l.id}/tasks`, { title: title.value, priority: Number(prio.value), billing_mode: mode.value, inputs: Object.fromEntries(Object.entries(inputs).map(([n, el]) => [n, el.value])) });
+      const task = await api.post(`/api/projects/${projectId}/lanes/${l.id}/tasks`, { title: title.value, priority: Number(prio.value), billing_mode: mode.value, ...me.body(), inputs: Object.fromEntries(Object.entries(inputs).map(([n, el]) => [n, el.value])) });
       setBanner(`Task #${task.id} created in BACKLOG`, "info");
       route(`#/task/${task.id}`);
     });
@@ -349,6 +350,7 @@ function laneTaskForm(l, projectId) {
   field(`Title${t.title_prefix ? ` (starts with “${t.title_prefix.trim()}”)` : ""}`, title),
   Object.entries(inputs).map(([n, el]) => field(n.replace(/_/g, " "), el)),
   h("div", { class: "row" }, field("Priority (lower runs first)", prio), field("Billing mode", mode)),
+  me.fields(),
   h("p", null, h("button", { class: "primary", type: "submit" }, "Create task in BACKLOG")));
 }
 
@@ -401,15 +403,38 @@ function sourcesPane(project) {
     project.commands.length ? h("ul", null, project.commands.map((c) => h("li", null, `${c.purpose}: ${c.argv.join(" ")}`))) : h("p", { class: "muted" }, "None."));
 }
 
+const MODELS = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+// Per-task model + effort pickers with a live rough price preview (planning aid, not a cap).
+function modelEffort() {
+  const model = h("select", { class: "me-model" }, [h("option", { value: "" }, "default (Settings)"), ...MODELS.map((m) => h("option", { value: m }, m))]);
+  const effort = h("select", { class: "me-effort" }, [h("option", { value: "" }, "default (Settings)"), ...EFFORTS.map((m) => h("option", { value: m }, m))]);
+  const preview = h("p", { class: "muted", role: "status" }, "");
+  let defaults = null;
+  const refresh = async () => {
+    try {
+      defaults = defaults || (await api.get("/api/wizard/status")).config || {};
+      const m = model.value || defaults.default_model || "claude-sonnet-5-5";
+      const e = effort.value || defaults.default_effort || "high";
+      const r = await api.get(`/api/budget/estimate?model=${encodeURIComponent(m)}&effort=${encodeURIComponent(e)}`);
+      preview.textContent = `Rough estimate for a typical API task on ${m} at ${e}: ~$${Number(r.estimate_usd).toFixed(2)} (planning figure only; the real limit is the task budget).`;
+    } catch (_) { preview.textContent = ""; }
+  };
+  model.addEventListener("change", refresh); effort.addEventListener("change", refresh); refresh();
+  return { model, effort, preview,
+    body: () => ({ model: model.value || null, effort: effort.value || null }),
+    fields: () => h("div", null, h("div", { class: "row" }, field("Model", model), field("Effort", effort)), preview) };
+}
 function addPane(id) {
   const title = h("input", { id: "t-title", size: 50 });
   const desc = h("textarea", { id: "t-desc" });
   const prio = h("input", { id: "t-prio", type: "number", value: "100", min: "0", max: "10000" });
   const mode = h("select", { id: "t-mode" }, ["mock", "api"].map((m) => h("option", { value: m }, m)));
+  const me = modelEffort();
   const todo = h("textarea", { id: "todo-text", placeholder: "- [ ] first item\n- [ ] second item" });
   return h("div", null,
-    h("form", { class: "card", onsubmit: (e) => { e.preventDefault(); act(() => api.post(`/api/projects/${id}/tasks`, { title: title.value, description: desc.value, priority: Number(prio.value), billing_mode: mode.value }), () => route(`#/project/${id}/board`)); } },
-      h("h2", null, "New task"), field("Title", title), field("Description", desc), field("Priority (lower runs first)", prio),
+    h("form", { class: "card", onsubmit: (e) => { e.preventDefault(); act(() => api.post(`/api/projects/${id}/tasks`, { title: title.value, description: desc.value, priority: Number(prio.value), billing_mode: mode.value, ...me.body() }), () => route(`#/project/${id}/board`)); } },
+      h("h2", null, "New task"), field("Title", title), field("Description", desc), field("Priority (lower runs first)", prio), me.fields(),
       field("Billing mode (api needs a key and a cap; mock is free)", mode), h("p", null, h("button", { class: "primary", type: "submit" }, "Create task"))),
     h("form", { class: "card", onsubmit: (e) => { e.preventDefault(); act(() => api.post(`/api/projects/${id}/tasks/import-todo`, { text: todo.value }), () => route(`#/project/${id}/board`)); } },
       h("h2", null, "Import a TODO list"), todo, h("p", null, h("button", { type: "submit" }, "Import checkboxes"))));
@@ -463,7 +488,7 @@ async function taskView(id) {
   const logBox = h("pre", { class: "log", id: "run-log", "aria-label": "Live worker log" }, latest ? "" : "No run yet.");
   const streamState = h("span", { class: "pill" }, latest ? "…" : "idle");
   show(my, h("h1", null, task.title), h("div", { class: "muted" }, link(`#/project/${task.project_id}/board`, project.name)),
-    h("div", { class: "row" }, statusPill(task.status), `priority ${task.priority} · ${task.billing_mode} · model ${task.model || "default"} · retries ${task.retry_count}`),
+    h("div", { class: "row" }, statusPill(task.status), `priority ${task.priority} · ${task.billing_mode} · model ${task.model || "default"} · effort ${task.effort || "default"} · retries ${task.retry_count}`),
     task.block_reason ? h("div", { class: "note warn" }, `Blocked: ${task.block_reason}`) : null,
     trustNote(project),
     laneBox,

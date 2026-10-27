@@ -141,3 +141,4 @@
 - The 20 scenarios are proved by named existing tests; a test fails if one is renamed or deleted. The API reference is generated from the code and checked by a test.
 - Installer: `scripts/install.ps1` = setup + Desktop and Start Menu shortcuts; `uninstall.ps1` removes shortcuts and `.venv` only and never touches `data\` or worktrees. No signed installer or MSI (single user, one PC).
 - Version 0.18.0 (0.17.0 is WP13), no migration. No real API, GitHub or Windows call was made.
+- v0.19.0: per-task model/effort were already stored and passed to the SDK; added pickers in both task forms, model validation against the price-table models, default effort from Settings when a task has none, and a rough per-model/effort estimate (heuristic token profile, output scaled by effort). The estimate is shown only; it does not become the task cap (a heuristic cap could stop a good run). No migration.

@@ -381,6 +381,10 @@ class RunSupervisor:
                 model = (get_setting(self.engine, "wizard.config") or {}).get(
                     "default_model", "claude-sonnet-5-5"
                 )
+            if not effort:
+                effort = (get_setting(self.engine, "wizard.config") or {}).get(
+                    "default_effort", "high"
+                )
         elif billing == "mock":
             if scenario not in SCENARIOS:
                 raise RunRefused(f"unknown scenario; choose one of {', '.join(SCENARIOS)}")
