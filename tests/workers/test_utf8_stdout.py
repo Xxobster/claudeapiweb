@@ -4,8 +4,7 @@ import subprocess
 import sys
 
 _CODE = (
-    "from cpm.workers.run import _utf8_stdio, emit; "
-    "_utf8_stdio(); emit('text', text='a \\u2194 b')"
+    "from cpm.workers.run import _utf8_stdio, emit; _utf8_stdio(); emit('text', text='a \\u2194 b')"
 )
 
 
