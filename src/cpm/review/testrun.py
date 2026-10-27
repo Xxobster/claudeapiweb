@@ -58,7 +58,7 @@ class SubprocessTestRunner:
     def run(self, argv: list[str], cwd: Path, timeout_s: float = DEFAULT_TIMEOUT_S) -> TestOutcome:
         t0 = time.monotonic()
         try:
-            tree = proctree.spawn(argv, build_mock_env({}, {"PYTHONIOENCODING": "utf-8"}), cwd)
+            tree = proctree.spawn(argv, build_mock_env(None, {"PYTHONIOENCODING": "utf-8"}), cwd)
         except OSError as exc:
             return TestOutcome(argv, None, False, 0.0, f"could not start: {type(exc).__name__}")
         sink: deque[bytes] = deque()

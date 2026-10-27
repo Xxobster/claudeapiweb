@@ -248,3 +248,7 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 - Real bug (first long live run, 3.85 USD lost to a crash): workers start with `python -I`, which ignores `PYTHONIOENCODING`, so on Windows their stdout stayed cp1252 and a character such as an arrow in the model's text raised `UnicodeEncodeError`, crashing the run mid-way. `workers/run.py` now reconfigures stdout/stderr/stdin to UTF-8 at start (the supervisor already reads UTF-8). Test: `tests/workers/test_utf8_stdout.py`. Files the worker wrote before the crash stay in its worktree; a crashed run is resumed with the same session.
 - Known cosmetic: stopping a run prints `aclose(): asynchronous generator is already running` on stderr (SDK shutdown); the run still ends STOPPED.
 
+## 2p. Gate test runner environment (2026-10-27, v0.19.3)
+- Real bug: `review/testrun.py` built the test child's environment from an EMPTY parent mapping (`build_mock_env({}, ...)`), so it had no `SYSTEMROOT`/`PATH`; on Windows Python then failed to start (`WinError 10106` in `_overlapped`) and every project test run of the acceptance gate failed, which made the gate ask for a (paid) correction. Now the allowlisted variables of CPM's own environment are passed (still no credentials: `build_mock_env` drops all of them). Test: `tests/review/test_testrun_env.py`.
+- Chain: gate -> testrun env -> (unchanged) `CREDENTIAL_VARS` filtering, so no secret reaches the project's tests.
+
