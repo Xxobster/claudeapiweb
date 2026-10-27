@@ -1,5 +1,7 @@
 """Token, Host, Origin, CSRF and DNS-rebinding checks (THREATS T-02)."""
 
+import os
+
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
@@ -91,5 +93,5 @@ def test_token_file_private_and_stable(settings, client):
     assert path.exists()
     assert load_or_create_token(settings.data_dir) == path.read_text().strip()
     assert len(path.read_text().strip()) >= 40
-    if path.stat().st_mode & 0o777:  # POSIX only
+    if os.name != "nt":  # POSIX modes only
         assert path.stat().st_mode & 0o077 == 0

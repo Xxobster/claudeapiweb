@@ -11,6 +11,23 @@ from cpm.workers.supervisor import LiveRunNotAllowed, RunError, RunRefused
 
 
 def _alive(pid: int) -> bool:
+    if os.name == "nt":
+        # os.kill(pid, 0) would TERMINATE the process on Windows: ask for its exit code instead.
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+        k32.OpenProcess.restype = ctypes.c_void_p
+        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return (
+                bool(k32.GetExitCodeProcess(ctypes.c_void_p(handle), ctypes.byref(code)))
+                and code.value == 259
+            )
+        finally:
+            k32.CloseHandle(ctypes.c_void_p(handle))
     try:
         os.kill(pid, 0)
     except OSError:
@@ -111,13 +128,16 @@ def test_cancel_kills_the_whole_process_tree(env):
     time.sleep(0.3)
     for pid in (run.pid, grand):
         try:
-            os.waitpid(pid, os.WNOHANG)  # reap if it is our child; grandchild is re-parented
+            if os.name != "nt":
+                os.waitpid(pid, os.WNOHANG)  # reap if it is our child; grandchild is re-parented
         except ChildProcessError:
             pass
         assert not _alive(pid) or _zombie(pid)
 
 
 def _zombie(pid: int) -> bool:
+    if os.name == "nt":
+        return False  # no zombies on Windows: a dead process is simply gone
     try:
         return open(f"/proc/{pid}/stat").read().split(")")[-1].split()[0] == "Z"
     except OSError:
@@ -251,7 +271,7 @@ def test_sigterm_style_child_exit_without_result_is_crash(env, monkeypatch):
     t = env.new_task()
     run = env.sup.start(t.id, scenario="slow", scenario_args={"steps": 200, "delay_s": 0.05})
     time.sleep(0.4)
-    os.kill(run.pid, signal.SIGKILL)
+    os.kill(run.pid, getattr(signal, "SIGKILL", signal.SIGTERM))  # Windows: TerminateProcess
     done = env.sup.wait(run.id)
     assert done.status == "CRASHED" and supervisor.RUN_ENDED
 

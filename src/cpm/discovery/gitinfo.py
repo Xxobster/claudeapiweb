@@ -29,6 +29,10 @@ _HARDEN = [
     "-c",
     "core.pager=cat",
 ]
+if os.name == "nt":
+    # GIT_CONFIG_NOSYSTEM drops Git for Windows' system `core.autocrlf=true`; without it every CRLF
+    # checkout looks modified (inflated dirty counts, a second commit at integration).
+    _HARDEN += ["-c", "core.autocrlf=true"]
 _SCP_LIKE = re.compile(r"^[\w.-]+@[\w.-]+:[^\s]+$")
 
 
