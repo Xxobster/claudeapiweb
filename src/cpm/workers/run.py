@@ -42,7 +42,17 @@ def _heartbeat(stop: threading.Event, every: float) -> None:
         emit("heartbeat")
 
 
+def _utf8_stdio() -> None:
+    """`-I` ignores PYTHONIOENCODING, so on Windows stdout/stderr stay cp1252 and any other
+    character (an arrow in the model's text) crashed the worker mid-run. The parent reads UTF-8."""
+    for stream in (sys.stdout, sys.stderr, sys.stdin):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_stdio()
     ap = argparse.ArgumentParser()
     ap.add_argument("--spec", required=True)
     args = ap.parse_args(argv)

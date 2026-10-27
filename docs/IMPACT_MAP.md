@@ -243,3 +243,8 @@ High: T-01, T-02, T-03, T-04, T-05, T-06, T-12, T-13, T-18, T-19, T-20 (needs Mi
 ## 2p. Task description limit raised (v0.19.1)
 - Touches: `tasks/service.MAX_TEXT` (single source, 20k -> 200k chars), `api/tasks.py` (TaskIn/TaskPatch/SplitPart/PlanIn import it), `workers/prompt.py` (description goes into the worker prompt as JSON). DB column is `Text` (unbounded), UI has no maxlength: no migration, no UI change.
 - Security: the cap still bounds DB growth and prompt size (200k chars ~ 50k tokens, `ensure_ascii` JSON can inflate non-ASCII text up to ~6x so very accented text costs more). Description stays untrusted TASK DATA. Risk R-DESC-1: a huge description raises per-run input cost; the budget cap still applies.
+
+## 2o. Worker UTF-8 stdout (2026-10-27, v0.19.2)
+- Real bug (first long live run, 3.85 USD lost to a crash): workers start with `python -I`, which ignores `PYTHONIOENCODING`, so on Windows their stdout stayed cp1252 and a character such as an arrow in the model's text raised `UnicodeEncodeError`, crashing the run mid-way. `workers/run.py` now reconfigures stdout/stderr/stdin to UTF-8 at start (the supervisor already reads UTF-8). Test: `tests/workers/test_utf8_stdout.py`. Files the worker wrote before the crash stay in its worktree; a crashed run is resumed with the same session.
+- Known cosmetic: stopping a run prints `aclose(): asynchronous generator is already running` on stderr (SDK shutdown); the run still ends STOPPED.
+
